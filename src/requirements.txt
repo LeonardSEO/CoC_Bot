@@ -5,6 +5,7 @@ curl-cffi
 easyocr
 flask
 groq
+loguru
 lxml
 matplotlib
 numpy
