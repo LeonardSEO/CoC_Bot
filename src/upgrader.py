@@ -66,7 +66,7 @@ class Upgrader:
         while time.time() < start + timeout:
             try:
                 section = Frame_Handler.get_frame_section(0.8, 0, 0.96, 0.30, high_contrast=True, thresh=240)
-                if configs.DEBUG: Frame_Handler.save_frame(section, "debug/resources.png")
+                if configs.DEBUG: Frame_Handler.save_frame(section, "resources.png")
                 text = OCR_Handler.get_text(section)
                 if configs.DEBUG: print(text)
                 gold, elixir, dark_elixir = [int(fix_digits(s.replace(' ', ''))) for s in text]
@@ -84,7 +84,7 @@ class Upgrader:
         while time.time() < start + timeout:
             try:
                 section = Frame_Handler.get_frame_section(0.368, 0.04, -0.59, 0.08, high_contrast=True)
-                if configs.DEBUG: Frame_Handler.save_frame(section, "debug/home_lab.png")
+                if configs.DEBUG: Frame_Handler.save_frame(section, "home_lab.png")
                 
                 # Find the backslash
                 slash = cv2.cvtColor(self.misc_assets["slash"], cv2.COLOR_RGB2GRAY)
@@ -108,8 +108,8 @@ class Upgrader:
         start = time.time()
         while time.time() < start + timeout:
             try:
-                section = Frame_Handler.get_frame_section(0.448, 0.04, -0.515, 0.08, high_contrast=True)
-                if configs.DEBUG: Frame_Handler.save_frame(section, "debug/builder_lab.png")
+                section = Frame_Handler.get_frame_section(0.45, 0.04, -0.505, 0.08, high_contrast=True)
+                if configs.DEBUG: Frame_Handler.save_frame(section, "builder_lab.png")
                 
                 # Find the backslash
                 slash = cv2.cvtColor(self.misc_assets["slash"], cv2.COLOR_RGB2GRAY)
@@ -195,7 +195,7 @@ class Upgrader:
         import re
         x, y = Frame_Handler.locate(self.assets["upgrade_name"], ref="lc", thresh=0.9)
         section = Frame_Handler.get_frame_section(x+0.122, y-0.04, 1-x, y+0.035, high_contrast=True, thresh=255, use_cached=True)
-        if configs.DEBUG: Frame_Handler.save_frame(section, "debug/upgrade_name.png")
+        if configs.DEBUG: Frame_Handler.save_frame(section, "upgrade_name.png")
         upgrade_name = spell_check(re.sub(r"\s*x\d+$", "", OCR_Handler.get_text(section)[0].lower()[:-3]), categories, phrase_level=True)
         return upgrade_name
 

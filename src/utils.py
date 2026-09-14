@@ -17,8 +17,10 @@ APP_DATA_DIR.mkdir(exist_ok=True)
 
 if getattr(sys, "frozen", False):
     CACHE_PATH = APP_DATA_DIR / "cache.json"
+    DEBUG_DIR = APP_DATA_DIR / "debug"
 else:
     CACHE_PATH = Path(__file__).parent / "cache.json"
+    DEBUG_DIR = Path(__file__).parent.parent / "debug"
 
 INSTANCE_ID = ADB_ADDRESS = None
 TEMP_CACHE = {}
@@ -500,7 +502,7 @@ def get_home_builders(timeout=60, return_amount=True, raise_exception=True, use_
     while True:
         try:
             section = Frame_Handler.get_frame_section(0.49, 0.04, -0.455, 0.08, high_contrast=True, use_cached=use_cached_frame)
-            if configs.DEBUG: Frame_Handler.save_frame(section, "debug/home_builders.png")
+            if configs.DEBUG: Frame_Handler.save_frame(section, "home_builders.png")
             
             slash = cv2.cvtColor(Asset_Manager.misc_assets["slash"], cv2.COLOR_RGB2GRAY)
             res = cv2.matchTemplate(section, slash, cv2.TM_CCOEFF_NORMED)
@@ -649,8 +651,8 @@ def get_builder_builders(timeout=60, return_amount=True, raise_exception=True, u
     start = time.time()
     while True:
         try:
-            section = Frame_Handler.get_frame_section(0.565, 0.04, -0.38, 0.08, high_contrast=True, use_cached=use_cached_frame)
-            if configs.DEBUG: Frame_Handler.save_frame(section, "debug/builder_builders.png")
+            section = Frame_Handler.get_frame_section(0.57, 0.04, -0.383, 0.08, high_contrast=True, use_cached=use_cached_frame)
+            if configs.DEBUG: Frame_Handler.save_frame(section, "builder_builders.png")
             
             slash = cv2.cvtColor(Asset_Manager.misc_assets["slash"], cv2.COLOR_RGB2GRAY)
             res = cv2.matchTemplate(section, slash, cv2.TM_CCOEFF_NORMED)
@@ -1607,7 +1609,7 @@ class Frame_Handler:
             frame = np.array(frame)[..., :3]
             frame = cv2.resize(frame, WINDOW_DIMS, interpolation=cv2.INTER_NEAREST)
             cls.cached_frame = frame.copy()
-        if configs.DEBUG: cls.save_frame(frame, "debug/frame.png")
+        # if configs.DEBUG: cls.save_frame(frame, "frame.png")
         if high_contrast: frame = cls.high_contrast(frame, thresh)
         elif grayscale: frame = cls.grayscale(frame)
         return frame
@@ -1621,10 +1623,12 @@ class Frame_Handler:
     @classmethod
     def save_frame(cls, frame, filename="frame.png"):
         import cv2
-        cv2.imwrite(filename, cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
+        DEBUG_DIR.mkdir(parents=True, exist_ok=True)
+        filename = f"{INSTANCE_ID}_{filename}" if INSTANCE_ID not in (None, "") else filename
+        cv2.imwrite(DEBUG_DIR / filename, cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
 
     @classmethod
-    def screenshot(cls, filename="debug/screenshot.png", grayscale=False):
+    def screenshot(cls, filename="screenshot.png", grayscale=False):
         frame = cls.get_frame(grayscale=grayscale)
         cls.save_frame(frame, filename)
     
