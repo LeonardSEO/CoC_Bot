@@ -59,24 +59,6 @@ class Upgrader:
     # 💰 Resource & Builder Tracking
     # ============================================================
 
-    def get_resources(self, timeout=60):
-        import time
-        
-        start = time.time()
-        while time.time() < start + timeout:
-            try:
-                section = Frame_Handler.get_frame_section(0.8, 0, 0.96, 0.30, high_contrast=True, thresh=240)
-                if configs.DEBUG: Frame_Handler.save_frame(section, "resources.png")
-                text = OCR_Handler.get_text(section)
-                if configs.DEBUG: print(text)
-                gold, elixir, dark_elixir = [int(fix_digits(s.replace(' ', ''))) for s in text]
-                return {"gold": gold, "elixir": elixir, "dark_elixir": dark_elixir}
-            except (KeyboardInterrupt, SystemExit): raise
-            except Exception as e:
-                if configs.DEBUG: print("get_resources", e)
-            time.sleep(0.5)
-        raise Exception("Failed to get resources")
-
     def home_lab_available(self, timeout=60):
         import time, cv2
         
@@ -98,7 +80,7 @@ class Upgrader:
                 return available > 0
             except (KeyboardInterrupt, SystemExit): raise
             except Exception as e:
-                if configs.DEBUG: print("home_lab_available", e)
+                logger.error(f"Upgrader.home_lab_available: {e}")
             time.sleep(0.5)
         raise Exception("Failed to get home lab availability")
 
@@ -123,21 +105,9 @@ class Upgrader:
                 return available > 0
             except (KeyboardInterrupt, SystemExit): raise
             except Exception as e:
-                if configs.DEBUG: print("builder_lab_available", e)
+                logger.error(f"Upgrader.builder_lab_available: {e}")
             time.sleep(0.5)
         raise Exception("Failed to get builder lab availability")
-
-    def collect_resources(self):
-        import numpy as np
-        try:
-            x_range = np.linspace(0.2, 0.8, 20)
-            y_range = np.linspace(0.3, 0.8, 20)
-            for x in x_range:
-                for y in y_range:
-                    Input_Handler.click(x, y)
-        except (KeyboardInterrupt, SystemExit): raise
-        except Exception as e:
-            if configs.DEBUG: print("collect_resources", e)
 
     def collect_builder_attack_elixir(self):
         import time
@@ -417,8 +387,8 @@ class Upgrader:
             time.sleep(0.5)
             return upgrade_name
         except (KeyboardInterrupt, SystemExit): raise
-        except Exception as e:
-            if configs.DEBUG: print("home_random_upgrade", e)
+        except Exception:
+            logger.exception("Upgrader.home_random_upgrade:")
             return None
 
     @require_exit()
@@ -470,7 +440,6 @@ class Upgrader:
 
                                 # Or if it is aligned to green discount tag
                                 tag_x, tag_y = Frame_Handler.locate(self.assets["green_tag"], section, thresh=0.80, grayscale=False, ref="rc", normalize=False)
-                                print(abs(x - (menu_left + tag_x/WINDOW_DIMS[1])))
                                 if tag_x is not None and tag_y is not None and abs(x - (menu_left + tag_x/WINDOW_DIMS[1])) < 0.02:
                                     return x, y # Prioritize discounted upgrades
 
@@ -514,8 +483,8 @@ class Upgrader:
             time.sleep(0.5)
             return upgrade_name
         except (KeyboardInterrupt, SystemExit): raise
-        except Exception as e:
-            if configs.DEBUG: print("home_specified_upgrade", e)
+        except Exception:
+            logger.exception("Upgrader.home_specified_upgrade:")
             return None
     
     @require_exit()
@@ -562,8 +531,8 @@ class Upgrader:
             Input_Handler.click(x, y)
             time.sleep(0.5)
         except (KeyboardInterrupt, SystemExit): raise
-        except Exception as e:
-            if configs.DEBUG: print("assign_builder_apprentice", e)
+        except Exception:
+            logger.exception("Upgrader.assign_builder_apprentice:")
     
     @require_exit()
     def home_lab_random_upgrade(self):
@@ -637,8 +606,8 @@ class Upgrader:
             time.sleep(0.5)
             return upgrade_name
         except (KeyboardInterrupt, SystemExit): raise
-        except Exception as e:
-            if configs.DEBUG: print("home_lab_upgrade", e)
+        except Exception:
+            logger.exception("Upgrader.home_lab_random_upgrade:")
             return None
     
     @require_exit()
@@ -724,8 +693,8 @@ class Upgrader:
             time.sleep(0.5)
             return upgrade_name
         except (KeyboardInterrupt, SystemExit): raise
-        except Exception as e:
-            if configs.DEBUG: print("home_lab_specified_upgrade", e)
+        except Exception:
+            logger.exception("Upgrader.home_lab_specified_upgrade:")
             return None
     
     @require_exit()
@@ -772,8 +741,8 @@ class Upgrader:
             Input_Handler.click(x, y)
             time.sleep(0.5)
         except (KeyboardInterrupt, SystemExit): raise
-        except Exception as e:
-            if configs.DEBUG: print("assign_lab_assistant", e)
+        except Exception:
+            logger.exception("Upgrader.assign_lab_assistant:")
     
     @require_exit()
     def builder_random_upgrade(self):
@@ -862,10 +831,8 @@ class Upgrader:
             time.sleep(0.5)
             return upgrade_name
         except (KeyboardInterrupt, SystemExit): raise
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            if configs.DEBUG: print("builder_random_upgrade", e)
+        except Exception:
+            logger.exception("Upgrader.builder_random_upgrade:")
             return None
     
     @require_exit()
@@ -946,8 +913,8 @@ class Upgrader:
             time.sleep(0.5)
             return upgrade_name
         except (KeyboardInterrupt, SystemExit): raise
-        except Exception as e:
-            if configs.DEBUG: print("builder_specified_upgrade", e)
+        except Exception:
+            logger.exception("Upgrader.builder_specified_upgrade:")
             return None
     
     @require_exit()
@@ -1029,8 +996,8 @@ class Upgrader:
             time.sleep(0.5)
             return upgrade_name
         except (KeyboardInterrupt, SystemExit): raise
-        except Exception as e:
-            if configs.DEBUG: print("builder_lab_random_upgrade", e)
+        except Exception:
+            logger.exception("Upgrader.builder_lab_random_upgrade:")
             return None
     
     @require_exit()
@@ -1111,8 +1078,8 @@ class Upgrader:
             time.sleep(0.5)
             return upgrade_name
         except (KeyboardInterrupt, SystemExit): raise
-        except Exception as e:
-            if configs.DEBUG: print("builder_lab_specified_upgrade", e)
+        except Exception:
+            logger.exception("Upgrader.builder_lab_specified_upgrade:")
             return None
     
     @require_exit()

@@ -1,6 +1,7 @@
 import sys, collections
 from pathlib import Path
 from functools import lru_cache
+from log import logger
 try:
     import configs
     from configs import *
@@ -65,8 +66,8 @@ def init_instance(id):
                 timeout=(10, 20)
             )
         except (KeyboardInterrupt, SystemExit): raise
-        except Exception as e:
-            if configs.DEBUG: print("init_instance", e)
+        except Exception:
+            logger.exception("init_instance:")
 
 def disable_sleep():
     import sys, subprocess, ctypes, os, shutil
@@ -117,8 +118,10 @@ def request_perms():
                 return False
 
         if not perms_granted():
+            logger.info("Requesting accessibility permissions...")
             ApplicationServices.AXIsProcessTrustedWithOptions({'AXTrustedCheckOptionPrompt': True})
             while not perms_granted(): time.sleep(0.5)
+            logger.info("Accessibility permissions granted!")
 
     elif sys.platform == "win32":
         pass
@@ -189,7 +192,7 @@ def running():
             return response.json().get("running", False)
         return False
     except Exception as e:
-        if configs.DEBUG: print("running", e)
+        logger.error(f"running: {e}")
         return False
 
 def click_with_timeout(locator_func, timeout=1, interval=0.1):
@@ -409,7 +412,7 @@ def update_status(status):
             )
         except (KeyboardInterrupt, SystemExit): raise
         except Exception as e:
-            if configs.DEBUG: print("update_status", e)
+            logger.error(f"update_status: {e}")
     if (gui_port := TEMP_CACHE.get("gui_port")) is not None:
         try:
             requests.post(
@@ -419,7 +422,7 @@ def update_status(status):
             )
         except (KeyboardInterrupt, SystemExit): raise
         except Exception as e:
-            if configs.DEBUG: print("update_status", e)
+            logger.error(f"update_status: {e}")
 
 def extend_pythonanywhere_hosting(username, password):
     import requests
@@ -516,7 +519,7 @@ def get_home_builders(timeout=60, return_amount=True, raise_exception=True, use_
             return available
         except (KeyboardInterrupt, SystemExit): raise
         except Exception as e:
-            if configs.DEBUG: print("get_home_builders", e)
+            logger.error(f"get_home_builders: {e}")
         time.sleep(0.1)
         if time.time() > start + timeout: break
     raise Exception("Failed to get home builders")
@@ -531,7 +534,7 @@ def start_coc(timeout=60, detailed=False):
             if not detailed: return False
             else: return False, "paused"
         to_system_home()
-        print("Starting CoC...", datetime.now().strftime("%I:%M:%S %p %m-%d-%Y"))
+        logger.info("Starting CoC...")
 
         cont_templates = [render_text("Continue", "SupercellMagic", s, color=(255, 255, 255)) for s in range(25, 31)]
 
@@ -572,22 +575,22 @@ def start_coc(timeout=60, detailed=False):
         if time.time() - start > timeout:
             stop_coc()
             raise Exception("Failed to start CoC")
-        print("CoC started", datetime.now().strftime("%I:%M:%S %p %m-%d-%Y"))
+        logger.info("CoC started")
         if not detailed: return True
         else: return True, "running"
     except (KeyboardInterrupt, SystemExit): raise
-    except Exception as e:
-        if configs.DEBUG: print("start_coc", e)
+    except Exception:
+        logger.exception("start_coc:")
         if not detailed: return False
         else: return False, "error"
 
 def stop_coc(sleep=False):
     from datetime import datetime
-    print("Stopping CoC...", datetime.now().strftime("%I:%M:%S %p %m-%d-%Y"))
+    logger.info("Stopping CoC...")
     ADB_Manager.adbutils_device.shell("am force-stop com.supercell.clashofclans")
     to_system_home()
     if sleep: Emulator_Manager.sleep()
-    print("CoC stopped", datetime.now().strftime("%I:%M:%S %p %m-%d-%Y"))
+    logger.info("CoC stopped")
 
 def update_coc(timeout=10, from_in_game=False):
     conn = ADB_Manager.uiautomator_device
@@ -598,7 +601,7 @@ def update_coc(timeout=10, from_in_game=False):
             conn(text="UPDATE").click(timeout=0)
         except (KeyboardInterrupt, SystemExit): raise
         except:
-            if configs.DEBUG: print("Failed to click update button")
+            logger.info("No update available")
             if not from_in_game: to_system_home()
             return
     
@@ -606,7 +609,7 @@ def update_coc(timeout=10, from_in_game=False):
         conn(text="Update").click(timeout=timeout)
     except (KeyboardInterrupt, SystemExit): raise
     except:
-        if configs.DEBUG: print("Failed to click update button")
+        logger.info("No update available")
         pass
     if not from_in_game: to_system_home()
 
@@ -666,7 +669,7 @@ def get_builder_builders(timeout=60, return_amount=True, raise_exception=True, u
             return available
         except (KeyboardInterrupt, SystemExit): raise
         except Exception as e:
-            if configs.DEBUG: print("get_builder_builders", e)
+            logger.error(f"get_builder_builders: {e}")
         time.sleep(0.1)
         if time.time() > start + timeout: break
     raise Exception("Failed to get builder builders")
@@ -825,7 +828,7 @@ class _Emulator_Manager:
         import psutil
 
         if cls.pid is None:
-            print(f"{cls.__name__} PID unset. Cannot sleep.")
+            logger.warning(f"{cls.__name__} PID unset. Cannot sleep.")
             return
 
         try:
@@ -838,7 +841,7 @@ class _Emulator_Manager:
         import psutil
 
         if cls.pid is None:
-            print(f"{cls.__name__} PID unset. Cannot wake.")
+            logger.warning(f"{cls.__name__} PID unset. Cannot wake.")
             return
 
         try:
@@ -929,7 +932,7 @@ class BlueStacks_Manager(_Emulator_Manager):
         cls.wake()
 
         if cls.check():
-            if configs.DEBUG: print("Bluestacks already running.")
+            logger.info("Bluestacks already running.")
             return
         
         str_target_instance_name = cls.internal_instance_name if cls.internal_instance_name is not None else ""
@@ -971,7 +974,7 @@ class BlueStacks_Manager(_Emulator_Manager):
         start_time = time.time()
         while time.time() - start_time < timeout:
             if cls.check():
-                if configs.DEBUG: print("BlueStacks started.")
+                logger.info("BlueStacks started.")
                 return
             time.sleep(0.5)
         
@@ -984,7 +987,7 @@ class BlueStacks_Manager(_Emulator_Manager):
         cls.wake()
 
         if not cls.check():
-            if configs.DEBUG: print("BlueStacks stopped.")
+            logger.info("BlueStacks stopped.")
             return
 
         try:
@@ -995,7 +998,7 @@ class BlueStacks_Manager(_Emulator_Manager):
         start_time = time.time()
         while time.time() - start_time < timeout:
             if not cls.check():
-                if configs.DEBUG: print("BlueStacks stopped.")
+                logger.info("BlueStacks stopped.")
                 return
             time.sleep(0.5)
         
@@ -1086,7 +1089,7 @@ class MuMu_Manager(_Emulator_Manager):
         cls.wake()
 
         if cls.check():
-            if configs.DEBUG: print("MuMu already running.")
+            logger.info("MuMu already running.")
             return
 
         cls._run("control", "--vmindex", cls.vmindex, "launch")
@@ -1094,7 +1097,7 @@ class MuMu_Manager(_Emulator_Manager):
         start_time = time.time()
         while time.time() - start_time < timeout:
             if cls.check():
-                if configs.DEBUG: print("MuMu started.")
+                logger.info("MuMu started.")
                 return
             time.sleep(0.5)
 
@@ -1107,14 +1110,14 @@ class MuMu_Manager(_Emulator_Manager):
         cls.wake()
 
         if not cls.check():
-            if configs.DEBUG: print("MuMu stopped.")
+            logger.info("MuMu stopped.")
             return
         cls._run("control", "--vmindex", cls.vmindex, "shutdown")
 
         start_time = time.time()
         while time.time() - start_time < timeout:
             if not cls.check():
-                if configs.DEBUG: print("MuMu stopped.")
+                logger.info("MuMu stopped.")
                 return
             time.sleep(0.5)
 
@@ -1178,7 +1181,7 @@ class Task_Handler:
             raise Exception("No external exclusion source available")
         except (KeyboardInterrupt, SystemExit): raise
         except Exception as e:
-            print("Task_Manager error:", e)
+            logger.error(f"Task_Handler.excluded: {e}")
             return not getattr(configs, cls.task_defaults[task_name], False)
 
 class OCR_Handler:
@@ -1312,9 +1315,7 @@ class DeviceProxy:
         except (KeyboardInterrupt, SystemExit): raise
         except (AttributeError, NotImplementedError): raise
         except Exception as e:
-            if configs.DEBUG:
-                print(f"[Auto-Recover] Error on __call__: {e}. Triggering reconnect...")
-            
+            logger.exception("DeviceProxy.__call__ reconnecting...:")
             if self._manager_cls.connect():
                 new_device = self._real_device
                 return new_device(*args, **kwargs)
@@ -1332,9 +1333,7 @@ class DeviceProxy:
                 except (KeyboardInterrupt, SystemExit): raise
                 except (AttributeError, NotImplementedError): raise
                 except Exception as e:
-                    if configs.DEBUG:
-                        print(f"[Auto-Recover] Error on {name}: {e}. Triggering reconnect...")
-                    
+                    logger.exception(f"DeviceProxy.{name} reconnecting...:")
                     if self._manager_cls.connect():
                         new_device = self._real_device
                         new_attr = getattr(new_device, name)
@@ -1388,7 +1387,7 @@ class ADB_Manager:
         pyminitouch.config.ADB_EXECUTOR = adb_executable
         import pyminitouch.connection
         pyminitouch.connection._ADB = adb_executable
-        if cls.is_connected(): return
+        # if cls.is_connected(): return
         subprocess.run([adb_executable, "start-server"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         res = adbutils.adb.connect(addr)
         if "connected" not in res:
@@ -1414,13 +1413,13 @@ class ADB_Manager:
         while time.time() - start < timeout:
             try:
                 cls.connect_once()
-                if configs.DEBUG: print("Connected to ADB.")
+                logger.info("Connected to ADB.")
                 return True
             except (KeyboardInterrupt, SystemExit): raise
-            except Exception as e:
-                if configs.DEBUG: print("connect_adb", e)
+            except Exception:
+                logger.error("Failed to connect to ADB. Retrying...")
             time.sleep(0.5)
-        if configs.DEBUG: print("Failed to connect to ADB.")
+        logger.error("Failed to connect to ADB.")
         return False
 
     @classproperty
@@ -1666,7 +1665,7 @@ class Frame_Handler:
 
         res = cv2.matchTemplate(frame, template, cv2.TM_CCOEFF_NORMED)
         _, max_val, _, max_loc = cv2.minMaxLoc(res)
-        if configs.DEBUG: print("locate confidence:", max_val)
+        # logger.debug(f"locate confidence: {max_val}")
 
         if return_all:
             ys, xs = np.where(res >= thresh)

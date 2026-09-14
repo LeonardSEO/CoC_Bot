@@ -67,9 +67,8 @@ class CoC_Bot:
                 time.sleep(60 * CHECK_INTERVAL)
             
             except (KeyboardInterrupt, SystemExit): raise
-            except Exception as e:
-                import traceback
-                traceback.print_exc()
+            except Exception:
+                logger.exception("CoC_Bot.run:")
                 stop_coc()
                 update_status("error")
                 time.sleep(60 * CHECK_INTERVAL)

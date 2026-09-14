@@ -64,7 +64,7 @@ class Attacker:
             locate_find_a_match,
             timeout=5
         ):
-            if configs.DEBUG: print("Failed to click find a match button")
+            logger.error("Failed to click find a match button")
             return False
 
         # Confirm attack
@@ -72,7 +72,7 @@ class Attacker:
             lambda: Frame_Handler.locate(self.assets["confirm_attack"], thresh=0.9),
             timeout=5
         ):
-            if configs.DEBUG: print("Failed to confirm attack")
+            logger.error("Failed to confirm attack")
             return False
 
         # Wait until "end battle" button is found
@@ -81,7 +81,7 @@ class Attacker:
             x, y = Frame_Handler.locate(self.assets["end_battle"], thresh=0.9)
             if x is not None and y is not None: return True
             time.sleep(0.1)
-        if configs.DEBUG: print("Failed to search for attack")
+        logger.error("Failed to search for attack")
         return False
     
     def start_builder_attack(self, timeout=60):
@@ -343,8 +343,8 @@ class Attacker:
             if self.start_normal_attack(timeout):
                 self.complete_normal_attack(restart=restart, exclude_clan_troops=EXCLUDE_CLAN_TROOPS)
         
-        except Exception as e:
-            if configs.DEBUG: print("attack_home_base", e)
+        except Exception:
+            logger.exception("Error in run_home_base():")
 
     @require_exit()
     def run_builder_base(self, timeout=60, restart=True):
@@ -365,5 +365,5 @@ class Attacker:
             if self.start_builder_attack(timeout):
                 self.complete_builder_attack(restart=restart)
         
-        except Exception as e:
-            if configs.DEBUG: print("attack_builder_base", e)
+        except Exception:
+            logger.exception("Error in run_builder_base():")
