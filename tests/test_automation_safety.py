@@ -201,7 +201,7 @@ class DiagnosticTests(unittest.TestCase):
         device.app_current.return_value = SimpleNamespace(package='com.android.vending')
         adb = SimpleNamespace(adb=Mock(),device=Mock(return_value=device))
         adb.adb.device_list.return_value = [SimpleNamespace(serial='127.0.0.1:5555')]
-        with tempfile.TemporaryDirectory() as directory, patch.dict(sys.modules,{'adbutils':adb}), patch.object(sys,'argv',['diagnose_android.py','--output',directory]), patch('builtins.print'):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(sys.modules,{'adbutils':adb}), patch.object(sys,'argv',['diagnose_android.py','--no-start','--no-open-clash','--output',directory]), patch('builtins.print'):
             self.assertEqual(module.main(),1)
             self.assertTrue((Path(directory)/'screen.png').exists())
             self.assertTrue((Path(directory)/'device.json').exists())
@@ -225,7 +225,7 @@ class DiagnosticTests(unittest.TestCase):
         device.rotation.return_value = 1
         adb = SimpleNamespace(adb=Mock(),device=Mock(return_value=device))
         adb.adb.device_list.return_value = [SimpleNamespace(serial='127.0.0.1:5555')]
-        with tempfile.TemporaryDirectory() as directory, patch.dict(sys.modules,{'adbutils':adb}), patch.object(sys,'argv',['diagnose_android.py','--open-clash','--output',directory]), patch('time.sleep') as sleep, patch('builtins.print'), patch.object(cv2,'minMaxLoc',return_value=(0,.95,(0,0),(0,0))):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(sys.modules,{'adbutils':adb}), patch.object(sys,'argv',['diagnose_android.py','--no-start','--open-clash','--output',directory]), patch('time.sleep') as sleep, patch('builtins.print'), patch.object(cv2,'minMaxLoc',return_value=(0,.95,(0,0),(0,0))):
             self.assertEqual(module.main(),0)
             info=json.loads((Path(directory)/'device.json').read_text())
             self.assertTrue(info['ready_for_automation'])
@@ -241,9 +241,9 @@ class DiagnosticTests(unittest.TestCase):
         spec.loader.exec_module(module)
         adb = SimpleNamespace(adb=Mock(),device=Mock())
         adb.adb.device_list.return_value = []
-        with tempfile.TemporaryDirectory() as directory, patch.dict(sys.modules,{'adbutils':adb}), patch.object(sys,'argv',['diagnose_android.py','--output',str(Path(directory)/'missing')]), patch('builtins.print') as message:
+        with tempfile.TemporaryDirectory() as directory, patch.dict(sys.modules,{'adbutils':adb}), patch.object(sys,'argv',['diagnose_android.py','--no-start','--no-open-clash','--output',str(Path(directory)/'missing')]), patch('builtins.print') as message:
             self.assertEqual(module.main(),2)
-            self.assertFalse((Path(directory)/'missing').exists())
+            self.assertTrue((Path(directory)/'missing'/'device.json').exists())
             self.assertIn('No connected Android device',message.call_args.args[0])
         adb.device.assert_not_called()
 
