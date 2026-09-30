@@ -54,11 +54,32 @@ class PurchaseTests(unittest.TestCase):
         namespace['OCR_Handler'].local_ocr.return_value = list(texts)
         return load({'Input_Handler'},namespace)['Input_Handler'], namespace
 
-    def test_shop_entry_and_resource_plus_regions_are_excluded(self):
+    def test_village_coordinates_do_not_define_a_payment_screen(self):
         handler,ns = self.handler(village=True)
         for point in [(.95,.9),(.92,.1),(-.05,-.1)]:
-            with self.assertRaises(AutomationStopped): handler._guard_purchase(*point)
+            handler._guard_purchase(*point)
         ns['OCR_Handler'].get_text.assert_not_called()
+
+    def test_menu_cleanup_does_not_tap_shop_corner_or_back_from_plain_village(self):
+        handler,ns = self.handler(village=True,texts=('Attack!', 'SHOP'))
+        handler.click = Mock()
+        handler.click_exit(n=4)
+        handler.click.assert_not_called()
+        ns['ADB_Manager'].adbutils_device.keyevent.assert_not_called()
+
+    def test_menu_cleanup_backs_out_once_then_stops_at_village(self):
+        handler,ns = self.handler(village=True)
+        ns['OCR_Handler'].local_ocr.side_effect = [['Suggested upgrades:','Wall'],['Attack!','SHOP']]
+        handler.click = Mock()
+        with patch('time.sleep'):
+            handler.click_exit(n=4)
+        handler.click.assert_not_called()
+        ns['ADB_Manager'].adbutils_device.keyevent.assert_called_once_with(4)
+
+    def test_menu_cleanup_cannot_send_inputs_to_payment_overlay(self):
+        handler,ns = self.handler(package='com.android.vending')
+        with self.assertRaises(AutomationStopped): handler.click_exit(n=4)
+        ns['ADB_Manager'].adbutils_device.keyevent.assert_not_called()
 
     def test_shop_modal_with_village_hud_is_blocked(self):
         handler,ns = self.handler(village=True,texts=('Shop','€4.99'))
