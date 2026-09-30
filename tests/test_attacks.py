@@ -120,6 +120,8 @@ def load_attacker():
     utils.Frame_Handler = Mock()
     utils.Input_Handler = Mock()
     utils.logger = Mock()
+    utils.stop_coc = Mock()
+    utils.start_coc = Mock()
     config = ModuleType('configs')
     config.TROOP_DEPLOY_TIME = .001
     config.ATTACK_SLOT_RANGE = (1, 1)

@@ -2,6 +2,7 @@ import importlib.util
 import sys
 import time
 import unittest
+import numpy as np
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock, patch
@@ -53,6 +54,8 @@ def load_upgrader():
     utils.require_exit = lambda *a, **kw: lambda func: func
     utils.Asset_Manager = SimpleNamespace(upgrader_assets={'confirm': 'confirm', 'upgrade_name': 'upgrade_name'}, misc_assets={})
     utils.Frame_Handler = Mock()
+    utils.Frame_Handler.get_frame.return_value = np.full((1080,1920,3),255,dtype=np.uint8)
+    utils.Frame_Handler.crop.return_value = np.full((50,300,3),255,dtype=np.uint8)
     utils.Input_Handler = Mock()
     utils.Task_Handler = Mock()
     utils.Task_Handler.excluded.return_value = False
@@ -69,14 +72,14 @@ def load_upgrader():
 
 
 class UpgradeIntegrationTests(unittest.TestCase):
-    def test_candidate_ocr_failure_retains_original_choice(self):
+    def test_candidate_ocr_failure_rejects_unverifiable_choice(self):
         module, utils = load_upgrader()
         bot = module.Upgrader(decisions=Mock(settings=Settings(mode='active')))
         module.Cache_Manager = {'vocab': {'buildings/home-village': ['Army Camp', 'Laboratory']}}
         module.OCR_Handler = Mock()
         module.OCR_Handler.get_text.side_effect = RuntimeError('OCR unavailable')
         legacy = (.5, .4)
-        self.assertEqual(bot._choose_jev_upgrade([legacy, (.5, .5)], legacy, .3, .8, 'home_base'), legacy)
+        self.assertEqual(bot._choose_jev_upgrade([legacy, (.5, .5)], legacy, .3, .8, 'home_base'), (None, None))
         self.assertIsNone(bot._pending_jev_upgrade)
 
     def test_active_unchanged_choice_rechecks_row_after_api_wait(self):
@@ -200,12 +203,13 @@ class UpgradeIntegrationTests(unittest.TestCase):
                     bot.home_specified_upgrade(['Laboratory', 'Army Camp'])
                 self.assertTrue(any(call.args[1] == .5 for call in utils.Input_Handler.click.call_args_list))
 
-    def test_shadow_confirmation_has_no_extra_observation_or_inputs(self):
+    def test_shadow_confirmation_uses_fresh_safety_observation_without_extra_inputs(self):
         module, utils = load_upgrader()
         bot = module.Upgrader(decisions=Mock(settings=Settings(mode='shadow')))
-        module.click_with_timeout = Mock(return_value=True)
+        utils.Frame_Handler.locate.return_value = (.5,.8)
         self.assertTrue(bot._click_home_confirm())
-        utils.Frame_Handler.get_frame.assert_not_called()
+        utils.Frame_Handler.get_frame.assert_called_once_with(grayscale=False)
+        utils.Input_Handler.click.assert_not_called()
 
 
 if __name__ == '__main__':

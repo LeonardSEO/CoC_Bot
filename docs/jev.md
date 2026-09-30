@@ -193,9 +193,11 @@ python scripts/jev_evaluate.py debug/main.jev.jsonl
 python scripts/jev_evaluate.py debug/main.jev.jsonl measured-outcomes.jsonl --instance main
 ```
 
-The original bot closes/reopens CoC after deployment and does not read the battle
-result. Offered loot is therefore logged as `loot_available`, **never as earned
-loot**. To compare actual farming performance, add independently measured
+Home Village now waits up to 240 seconds for the result and uses a freshly
+recognized Return Home button, then verifies the village HUD. It records completion
+separately from earned loot. Offered loot is logged as `loot_available`, **never
+as earned loot**. Builder farming retains its close/reopen approach, with a real
+force-stop before restarting. To compare actual farming performance, add independently measured
 battle-outcome rows (include search/battle/restart time in the duration):
 
 ```json
@@ -277,3 +279,44 @@ command with `osascript` without running it or requesting administrator access;
 that test is skipped on Linux/Windows. Release CI runs the suite on its macOS and
 Windows runners before packaging. None of this substitutes for an actual M4,
 BlueStacks and gameplay test.
+
+
+## Purchase exclusions and local UI inventory
+
+Every touch gesture now checks the foreground package and a fresh screenshot.
+The village shop/footer and resource-plus regions are excluded from taps. Local
+OCR blocks recognized shop/payment/resource-top-up prompts, including modals
+that leave the village HUD visible. OCR or foreground-observation failures stop
+inputs. These checks cannot guarantee recognition of every future/localized
+shop layout; no automatic purchases are supported. Release events remain allowed
+so existing touch contacts can always be lifted. Full-screen OCR on non-village
+screens adds local processing time. It uses `OCR_Handler.local_ocr`, never Groq
+or OpenRouter.
+
+Upgrade choices use a fresh right-hand price-column observation, reject red or
+unreadable prices, remove duplicate rows and recheck before clicking. A fresh
+confirmation gets a separate red-price guard in off/shadow/active modes. Colour
+indicators are heuristic evidence: numerical upgrade cost and bank balance remain
+explicitly unknown. Walls with unverified results end that upgrade cycle instead
+of being retried repeatedly. Jev cannot repair incorrect observations and shadow
+mode remains advisory.
+
+An optional read-only inventory can record UI version, local OCR, template
+scores/hashes and screenshots while **you** navigate:
+
+```sh
+python scripts/scan_current_ui.py --samples 15 --interval 2
+```
+
+Run with the bot worker stopped and BlueStacks open. Reports go to a new local
+`debug/ui-scan/<timestamp>/` directory with restricted file permissions. No
+navigation, model requests, updates or template replacement occurs. Scores are
+raw full-screen matches, not proof of a valid control in its expected region.
+Version changes and low scores require review against real screenshots before
+changing recognition. OCR and images can contain private account information.
+
+For richer decisions, the next useful input is a verified base profile (Town Hall,
+levels, resource balances, upgrade prices/durations, current army), extracted from
+validated regions. Automatic template replacement or execution of speculative
+model actions is not enabled. Image-capable decision providers require verification
+of their actual API contract and fixtures before integration.

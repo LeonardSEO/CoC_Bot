@@ -1465,6 +1465,35 @@ class ADB_Manager:
 
 class Input_Handler:
     @classmethod
+    def _guard_purchase(cls, x=None, y=None):
+        # Always local; never route purchase checks through external OCR/Jev.
+        from purchase_safety import reject_purchase_text
+        try:
+            if ADB_Manager.adbutils_device.app_current().package != 'com.supercell.clashofclans':
+                raise AutomationStopped('Purchase guard: Clash is not in front; refusing input')
+            frame = Frame_Handler.get_frame(grayscale=False)
+            village = (get_home_builders(0, return_amount=False, use_cached_frame=True)
+                       or get_builder_builders(0, return_amount=False, use_cached_frame=True))
+            if village:
+                if x is not None and y is not None:
+                    x = 1+x if x < 0 else x
+                    y = 1+y if y < 0 else y
+                    if (x >= .85 and y >= .80) or (x >= .80 and y <= .25):
+                        raise AutomationStopped('Purchase guard: shop/resource-entry region is excluded')
+                # A modal may leave the village HUD visible. Inspect its centre
+                # too, excluding the normal Shop label in the village footer.
+                from purchase_safety import purchase_reason
+                centre = Frame_Handler.crop(frame, .1, .12, .9, .8)
+                if purchase_reason(OCR_Handler.local_ocr(centre)):
+                    raise AutomationStopped('Purchase guard: shop/payment modal detected')
+                return
+            reject_purchase_text(OCR_Handler.local_ocr(frame))
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception:
+            raise AutomationStopped('Purchase guard observation failed; refusing input') from None
+
+    @classmethod
     def _to_raw(cls, x_frac, y_frac):
         raw_w = int(ADB_Manager.minitouch_device.connection.max_x)
         raw_h = int(ADB_Manager.minitouch_device.connection.max_y)
@@ -1488,6 +1517,7 @@ class Input_Handler:
 
     @classmethod
     def down(cls, x, y, pointer=0):
+        cls._guard_purchase(x, y)
         from pyminitouch import CommandBuilder
         if x < 0: x = 1 + x
         if y < 0: y = 1 + y
@@ -1513,6 +1543,7 @@ class Input_Handler:
 
     @classmethod
     def click(cls, x, y, n=1, delay=0, pointer=0):
+        screen_x, screen_y = x, y
         import time
         from pyminitouch import CommandBuilder
         if x < 0: x = 1 + x
@@ -1520,6 +1551,7 @@ class Input_Handler:
         x, y = cls._to_raw(x, y)
         builder = CommandBuilder()
         for _ in range(n):
+            cls._guard_purchase(screen_x, screen_y)
             builder.down(pointer, x, y, 100)
             builder.commit()
             builder.up(pointer)
@@ -1532,10 +1564,13 @@ class Input_Handler:
 
     @classmethod
     def multi_click(cls, x1, y1, x2, y2, duration=0):
+        cls._guard_purchase(x1, y1)
+        cls._guard_purchase(x2, y2)
         ADB_Manager.minitouch_device.tap([cls._to_raw(x1, y1), cls._to_raw(x2, y2)], duration=duration)
 
     @classmethod
     def swipe(cls, x1, y1, x2, y2, duration=100, hold_end_time=0, inter_points=0, pointer=0):
+        cls._guard_purchase()
         import time, numpy as np
         from pyminitouch import CommandBuilder
 
@@ -1581,6 +1616,7 @@ class Input_Handler:
 
     @classmethod
     def zoom(cls, dir="out", percent=1.0):
+        cls._guard_purchase()
         from pyminitouch import CommandBuilder
         
         builder = CommandBuilder()

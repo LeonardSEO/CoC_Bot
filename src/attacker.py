@@ -305,6 +305,31 @@ class Attacker:
         # Unselect last card
         Input_Handler.click(0.01, 0.9)
     
+    def _wait_for_home_battle(self, timeout=240):
+        """An ongoing attack is not a village startup failure."""
+        import time
+        started = time.monotonic()
+        logger.info('Troops deployed; waiting for the battle result...')
+        while time.monotonic() - started < timeout:
+            if not running():
+                raise AutomationStopped('Battle wait paused; no further inputs sent')
+            frame = Frame_Handler.get_frame(grayscale=False)
+            if get_home_builders(0, return_amount=False, use_cached_frame=True):
+                self.decisions.record('battle_outcome', village='home', success=True,
+                    completion='returned_to_village', duration_seconds=time.monotonic()-started)
+                return True
+            x, y = Frame_Handler.locate(self.assets['return_home'], frame=frame, thresh=.9)
+            if x is not None and y is not None:
+                # Reacquire on the frame immediately before the return click.
+                fresh = Frame_Handler.get_frame(grayscale=False)
+                x, y = Frame_Handler.locate(self.assets['return_home'], frame=fresh, thresh=.9)
+                if x is not None and y is not None:
+                    Input_Handler.click(x, y)
+            time.sleep(1)
+        self.decisions.record('battle_outcome', village='home', success=False,
+            completion='result_timeout', duration_seconds=time.monotonic()-started)
+        raise AutomationStopped('Battle result/village not recognized before the battle deadline; automation stopped')
+
     def complete_normal_attack(self, restart=True, exclude_clan_troops=False):
         import time, numpy as np
 
@@ -351,10 +376,10 @@ class Attacker:
             elif last_card_left is None:
                 break
         
-        # Close and reopen CoC to auto complete battle
-        if restart:
-            start_coc()
-        else:
+        # Let the deployed army finish; bringing the activity to the front
+        # does not restart Clash and must never trigger village startup here.
+        self._wait_for_home_battle()
+        if not restart:
             stop_coc()
     
     def complete_builder_attack(self, restart=True):
@@ -370,11 +395,10 @@ class Attacker:
         available_slots = [int(ATTACK_SLOT_RANGE[0] <= i <= ATTACK_SLOT_RANGE[1]) for i in range(len(card_centers))]
         self.deploy_troops(card_centers, available_slots=available_slots, card_counts=[4]*len(card_centers))
         
-        # Close and reopen CoC to auto complete battle
+        # Builder farming intentionally closes the battle, then really restarts.
+        stop_coc()
         if restart:
             start_coc()
-        else:
-            stop_coc()
     
     # ============================================================
     # ⚔️ Attack Management
