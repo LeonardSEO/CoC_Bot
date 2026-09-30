@@ -1,5 +1,6 @@
 import ast
 import json
+import importlib.util
 from pathlib import Path
 import sys
 import tempfile
@@ -105,6 +106,28 @@ class StartupTests(unittest.TestCase):
         manager.restart.assert_not_called()
         namespace["Exit_Handler"].register.assert_not_called()
         connect.assert_called_once_with("test-client",address="127.0.0.1:5555",start=False,wait=True)
+
+
+    def test_mac_launcher_passes_resolved_internal_instance(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "bluestacks.conf"
+            config.write_text('bst.instance.Second64.display_name="Second village"\nbst.instance.Second64.adb_port="5565"\n')
+            with patch.object(startup, "DEFAULT_CONFIG", config), patch.object(startup.sys, "platform", "darwin"), patch.object(startup.subprocess, "run", return_value=SimpleNamespace(returncode=0)) as run:
+                startup.open_bluestacks("Second village")
+            run.assert_called_once_with(["open", "-a", "BlueStacks", "--args", "--instance", "Second64"], capture_output=True, timeout=15)
+
+    def test_diagnostic_uses_remaining_total_deadline_for_village(self):
+        spec = importlib.util.spec_from_file_location("diagnose_deadline", ROOT / "scripts/diagnose_android.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        device = Mock()
+        device.shell.side_effect = ["package:clash.apk", "OK", "Physical size: 1080x1920"]
+        device.rotation.return_value = 1
+        adb = SimpleNamespace(adb=Mock(), device=Mock(return_value=device))
+        image = Mock()
+        with tempfile.TemporaryDirectory() as directory, patch.dict(sys.modules, {"adbutils":adb}), patch.object(sys, "argv", ["diagnose_android.py", "--output", directory]), patch.object(module, "ensure_android", return_value="127.0.0.1:5555"), patch.object(module, "wait_for_village", return_value=(image, {"ready_for_automation":True})) as wait, patch.object(module.time, "monotonic", side_effect=[0,40]), patch("builtins.print"):
+            self.assertEqual(module.main(), 0)
+            wait.assert_called_once_with(device, module.observe, timeout=20)
 
 
 if __name__ == "__main__":
