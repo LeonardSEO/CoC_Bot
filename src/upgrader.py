@@ -1,5 +1,6 @@
 from utils import *
 from upgrade_prices import price_status, red_price_mask
+from wall_upgrades import wall_level, wall_name
 try:
     import configs
     from configs import *
@@ -16,6 +17,10 @@ class Upgrader:
             decisions = create_service(configs)
         self.decisions = decisions
         self._pending_jev_upgrade = None
+        self._wall_selected = False
+        self._wall_before = None
+        self._wall_success = None
+        self._wall_group = False
         self._jev_availability = {'builders': None, 'lab_available': None}
 
     def _choose_jev_upgrade(self, locations, legacy, menu_left, menu_right, context, discounted=False):
@@ -95,6 +100,64 @@ class Upgrader:
             self.decisions.record('upgrade_rejected', reason='red_price' if status is False else 'price_unreadable')
         return status is True
 
+    def _remember_wall_row(self, menu_left, y, menu_right):
+        self._wall_selected = False
+        self._wall_before = self._wall_success = None
+        self._wall_group = False
+        frame = Frame_Handler.get_frame(grayscale=False)
+        # Only the row's exact name authorizes Select Row; no fuzzy match.
+        section = Frame_Handler.crop(frame, menu_left, y-.025, (menu_left+menu_right)/2, y+.025)
+        try:
+            self._wall_selected = wall_name(OCR_Handler.local_ocr(section))
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception:
+            self.decisions.record('wall_selection', selection='single', reason='wall_name_unreadable')
+
+    def _try_wall_row(self):
+        if not self._wall_selected:
+            return False
+        import time
+        frame = Frame_Handler.get_frame(grayscale=False)
+        section = Frame_Handler.crop(frame, .05, .62, .85, .95)
+        texts = OCR_Handler.local_ocr(section)
+        self._wall_before = wall_level(texts)
+        if not getattr(configs, 'WALL_GROUP_UPGRADES', True):
+            return False
+        if not any(text.strip().casefold() == 'select row' for text in texts):
+            self.decisions.record('wall_selection', selection='single', reason='select_row_not_recognized')
+            return False
+        # Locate the visible action, then reacquire immediately before clicking.
+        for size in (20,24,27,30,32):
+            template = render_text('Select Row', 'SupercellMagic', size)
+            x, y = Frame_Handler.locate(template, frame=section, thresh=.92)
+            if x is None or y is None:
+                continue
+            fresh = Frame_Handler.get_frame(grayscale=False)
+            fresh_section = Frame_Handler.crop(fresh, .05, .62, .85, .95)
+            x, y = Frame_Handler.locate(template, frame=fresh_section, thresh=.92)
+            if x is None or y is None:
+                return False
+            Input_Handler.click(.05+x*.80, .62+y*.33)
+            time.sleep(.5)
+            self._wall_group = True
+            self.decisions.record('wall_selection', selection='row', before_level=self._wall_before,
+                                  selected_count=None, total_cost=None)
+            return True
+        self.decisions.record('wall_selection', selection='single', reason='select_row_template_not_matched')
+        return False
+
+    def _verify_wall_upgrade(self):
+        if not self._wall_selected:
+            return
+        frame = Frame_Handler.get_frame(grayscale=False)
+        section = Frame_Handler.crop(frame, .05, .62, .85, .95)
+        after = wall_level(OCR_Handler.local_ocr(section))
+        self._wall_success = None if self._wall_before is None or after is None else after > self._wall_before
+        self.decisions.record('wall_outcome', selection='row' if self._wall_group else 'single',
+            before_level=self._wall_before, after_level=after, success=self._wall_success,
+            verified_count=None)
+
     def _jev_confirmation_name(self, frame):
         """Read an anchored dialog title exactly; fuzzy vocabulary is not proof."""
         import re
@@ -103,9 +166,12 @@ class Upgrader:
             return None
         section = Frame_Handler.crop(frame, x+.122, y-.04, 1-x, y+.035)
         texts = OCR_Handler.get_text(Frame_Handler.high_contrast(section, thresh=255))
-        name = ' '.join(texts).strip().lower()
+        name = ' '.join(texts).strip().lower().rstrip('?').strip()
+        name = re.sub(r'^upgrade\s+', '', name)
         name = re.sub(r'\s*x\d+$', '', name)
-        name = re.sub(r'\s+(?:to\s+)?(?:level\s*)?\(?\d+\)?\s*$', '', name)
+        name = re.sub(r'\s*(?:to\s+)?\(?\s*level\s*\d+\s*\)?\s*$', '', name)
+        name = re.sub(r'\s+\(?\d+\)?\s*$', '', name)
+        name = re.sub(r'\s*[x×]\s*\d+\s*$', '', name)
         return name
 
     def _verify_jev_confirmation(self, frame=None):
@@ -163,6 +229,9 @@ class Upgrader:
     def _click_home_confirm(self, timeout=5):
         def locate():
             frame = Frame_Handler.get_frame(grayscale=False)
+            if self._wall_group and self._jev_confirmation_name(frame) != 'wall':
+                self.decisions.record('upgrade_rejected', reason='wall_group_confirmation_unreadable')
+                return None, None
             if not self._verify_jev_confirmation(frame): return None, None
             x, y = Frame_Handler.locate(self.assets['confirm'], frame=frame, grayscale=False, thresh=.85)
             if x is None or y is None: return None, None
@@ -175,6 +244,9 @@ class Upgrader:
     def _click_builder_confirm(self, timeout=5):
         def locate():
             frame = Frame_Handler.get_frame(grayscale=False)
+            if self._wall_group and self._jev_confirmation_name(frame) != 'wall':
+                self.decisions.record('upgrade_rejected', reason='wall_group_confirmation_unreadable')
+                return None, None
             if not self._verify_jev_confirmation(frame): return None, None
             x, y = self._find_builder_confirm(frame=frame)
             if x is None or y is None: return None, None
@@ -412,6 +484,8 @@ class Upgrader:
         import time, numpy as np
 
         self._pending_jev_upgrade = None
+        self._wall_group = self._wall_selected = False
+        self._wall_before = self._wall_success = None
 
         try:
             # Open upgrade list menu
@@ -512,6 +586,7 @@ class Upgrader:
             )
             if x_upgrade is None or y_upgrade is None: return None
             if not self._row_price_allowed(menu_left, y_upgrade, menu_right): return None
+            self._remember_wall_row(menu_left, y_upgrade, menu_right)
             Input_Handler.click(x_upgrade, y_upgrade)
             time.sleep(0.5)
             
@@ -522,6 +597,7 @@ class Upgrader:
             else:
                 self._click_home_builders()
                 
+                self._try_wall_row()
                 if not self._click_upgrade(): return None
                 time.sleep(0.5)
             
@@ -536,6 +612,7 @@ class Upgrader:
             # Click confirm button
             if not self._click_home_confirm(): return None
             time.sleep(0.5)
+            if upgrade_name.lower() == 'wall': self._verify_wall_upgrade()
             return upgrade_name
         except (KeyboardInterrupt, SystemExit): raise
         except Exception:
@@ -547,6 +624,8 @@ class Upgrader:
         import time, numpy as np
         
         self._pending_jev_upgrade = None
+        self._wall_group = self._wall_selected = False
+        self._wall_before = self._wall_success = None
 
         try:
             # Render templates
@@ -616,6 +695,7 @@ class Upgrader:
             
             if x is None or y is None: return None
             if not self._row_price_allowed(menu_left, y, menu_right): return None
+            self._remember_wall_row(menu_left, y, menu_right)
             Input_Handler.click(x_sug, y)
             time.sleep(0.5)
             
@@ -626,6 +706,7 @@ class Upgrader:
             else:
                 self._click_home_builders()
                 
+                self._try_wall_row()
                 if not self._click_upgrade(): return None
                 time.sleep(0.5)
             
@@ -640,6 +721,7 @@ class Upgrader:
             # Click confirm button
             if not self._click_home_confirm(): return None
             time.sleep(0.5)
+            if upgrade_name.lower() == 'wall': self._verify_wall_upgrade()
             return upgrade_name
         except (KeyboardInterrupt, SystemExit): raise
         except Exception:
@@ -647,7 +729,11 @@ class Upgrader:
             return None
     
     @require_exit()
-    def home_upgrade(self):
+    def home_upgrade(self, walls_only=False):
+        if walls_only:
+            if not any(name.casefold() == 'wall' for group in configs.HOME_BASE_UPGRADE_PRIORITY for name in group):
+                return None
+            return self.home_specified_upgrade(['Wall'])
         if not Task_Handler.excluded("home_base_priority"):
             for priority_level in configs.HOME_BASE_UPGRADE_PRIORITY:
                 upgrade_name = self.home_specified_upgrade(priority_level)
@@ -698,6 +784,8 @@ class Upgrader:
         import time, numpy as np
         
         self._pending_jev_upgrade = None
+        self._wall_group = self._wall_selected = False
+        self._wall_before = self._wall_success = None
 
         try:
             # Open lab upgrade list menu
@@ -778,6 +866,8 @@ class Upgrader:
         import time, numpy as np
         
         self._pending_jev_upgrade = None
+        self._wall_group = self._wall_selected = False
+        self._wall_before = self._wall_success = None
 
         try:
             # Render templates
@@ -920,6 +1010,8 @@ class Upgrader:
         import time, re, numpy as np
         
         self._pending_jev_upgrade = None
+        self._wall_group = self._wall_selected = False
+        self._wall_before = self._wall_success = None
 
         try:
             # Open upgrade list menu
@@ -993,17 +1085,20 @@ class Upgrader:
             
             # Select upgrade
             if not self._row_price_allowed(menu_left, y_upgrade, menu_right): return None
+            self._remember_wall_row(menu_left, y_upgrade, menu_right)
             Input_Handler.click(x_upgrade, y_upgrade)
             
             # Exit upgrade menu
             self._click_builder_builders()
             
             # Click upgrade button
+            self._try_wall_row()
             if not self._click_upgrade(): return None
             
             # Click confirm button
             if not self._click_builder_confirm(): return None
             time.sleep(0.5)
+            if upgrade_name.lower() == 'wall': self._verify_wall_upgrade()
             return upgrade_name
         except (KeyboardInterrupt, SystemExit): raise
         except Exception:
@@ -1015,6 +1110,8 @@ class Upgrader:
         import time, numpy as np
         
         self._pending_jev_upgrade = None
+        self._wall_group = self._wall_selected = False
+        self._wall_before = self._wall_success = None
 
         try:
             # Render templates
@@ -1080,17 +1177,20 @@ class Upgrader:
             
             if x is None or y is None: return None
             if not self._row_price_allowed(menu_left, y, menu_right): return None
+            self._remember_wall_row(menu_left, y, menu_right)
             Input_Handler.click(x, y)
             time.sleep(0.5)
             
             self._click_builder_builders()
             
             # Click upgrade
+            self._try_wall_row()
             if not self._click_upgrade(): return None
             
             # Click confirm button
             if not self._click_builder_confirm(): return None
             time.sleep(0.5)
+            if upgrade_name.lower() == 'wall': self._verify_wall_upgrade()
             return upgrade_name
         except (KeyboardInterrupt, SystemExit): raise
         except Exception:
@@ -1098,7 +1198,11 @@ class Upgrader:
             return None
     
     @require_exit()
-    def builder_upgrade(self):
+    def builder_upgrade(self, walls_only=False):
+        if walls_only:
+            if not any(name.casefold() == 'wall' for group in configs.BUILDER_BASE_UPGRADE_PRIORITY for name in group):
+                return None
+            return self.builder_specified_upgrade(['Wall'])
         if not Task_Handler.excluded("builder_base_priority"):
             for priority_level in configs.BUILDER_BASE_UPGRADE_PRIORITY:
                 upgrade_name = self.builder_specified_upgrade(priority_level)
@@ -1110,6 +1214,8 @@ class Upgrader:
         import time, re, numpy as np
         
         self._pending_jev_upgrade = None
+        self._wall_group = self._wall_selected = False
+        self._wall_before = self._wall_success = None
 
         try:
             # Open lab upgrade list menu
@@ -1189,6 +1295,8 @@ class Upgrader:
         import time, numpy as np
         
         self._pending_jev_upgrade = None
+        self._wall_group = self._wall_selected = False
+        self._wall_before = self._wall_success = None
 
         try:
             # Render templates
@@ -1297,19 +1405,21 @@ class Upgrader:
                 counter += 1
                 try:
                     initial_builders = get_home_builders(1)
-                    if initial_builders <= max(0, OPEN_HOME_BUILDERS): break
+                    walls_only = initial_builders <= max(0, OPEN_HOME_BUILDERS)
                     self._jev_availability = {'builders': initial_builders, 'lab_available': None}
                     upgrade_started = time.monotonic()
-                    upgraded = self.home_upgrade()
+                    upgraded = self.home_upgrade(walls_only=True) if walls_only else self.home_upgrade()
                     time.sleep(0.5)
                     final_builders = get_home_builders(1)
                     self.decisions.record('upgrade_outcome', village='home_base', name=upgraded,
-                        success=(final_builders < initial_builders) if upgraded != 'wall' else None,
+                        success=(final_builders < initial_builders) if (upgraded or '').lower() != 'wall' else self._wall_success,
                         duration_seconds=time.monotonic()-upgrade_started)
                     if upgraded is not None:
                         upgraded = upgraded.lower()
                         if upgraded == 'wall':
-                            self.decisions.record('upgrade_cycle_stopped', reason='wall_result_unverified')
+                            if self._wall_success is True:
+                                continue
+                            self.decisions.record('upgrade_cycle_stopped', reason='wall_result_unverified' if self._wall_success is None else 'wall_level_unchanged')
                             break
                         if final_builders < initial_builders: upgrades_started.append(upgraded)
                         elif final_builders == initial_builders and upgraded != "wall": break
@@ -1353,19 +1463,21 @@ class Upgrader:
                 counter += 1
                 try:
                     initial_builders = get_builder_builders(1)
-                    if initial_builders <= max(0, OPEN_BUILDER_BUILDERS): break
+                    walls_only = initial_builders <= max(0, OPEN_BUILDER_BUILDERS)
                     self._jev_availability = {'builders': initial_builders, 'lab_available': None}
                     upgrade_started = time.monotonic()
-                    upgraded = self.builder_upgrade()
+                    upgraded = self.builder_upgrade(walls_only=True) if walls_only else self.builder_upgrade()
                     time.sleep(0.5)
                     final_builders = get_builder_builders(1)
                     self.decisions.record('upgrade_outcome', village='builder_base', name=upgraded,
-                        success=(final_builders < initial_builders) if upgraded != 'wall' else None,
+                        success=(final_builders < initial_builders) if (upgraded or '').lower() != 'wall' else self._wall_success,
                         duration_seconds=time.monotonic()-upgrade_started)
                     if upgraded is not None:
                         upgraded = upgraded.lower()
                         if upgraded == 'wall':
-                            self.decisions.record('upgrade_cycle_stopped', reason='wall_result_unverified')
+                            if self._wall_success is True:
+                                continue
+                            self.decisions.record('upgrade_cycle_stopped', reason='wall_result_unverified' if self._wall_success is None else 'wall_level_unchanged')
                             break
                         if final_builders < initial_builders: upgrades_started.append(upgraded)
                         elif final_builders == initial_builders and upgraded != "wall": break
