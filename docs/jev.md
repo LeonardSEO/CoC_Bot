@@ -52,6 +52,9 @@ JEV_DEPLOYMENT = False
 `off` uses the original choices and makes no API calls. `shadow` evaluates the
 recognized alternatives but returns the original choice; it adds no menu clicks,
 scrolls, base skips or alternate deployments. `active` can apply accepted choices.
+New installations default to `shadow`, BlueStacks instance `BlueStacks Air`,
+upgrade advice enabled and automatic local OCR. Setup preserves an existing
+`src/configs.py`; change these settings there manually when updating an install.
 Missing settings in older configs default to `off`. Missing keys, API errors,
 invalid responses, low confidence, low observation quality and stale snapshots
 retain the original choices. No automatic API retries are made.

@@ -41,7 +41,7 @@
 
     __BlueStacks:__
     * Enable Android Debug Bridge in "Advanced" settings
-    * In Multi-Instance Manager, rename instances to match instance IDs in `configs.py` (the default ID is main, see steps 3 and 6 in [Custom Setup Instructions](#custom-setup-instructions-recommended) for more details)
+    * Match instance names to `INSTANCE_IDS` in `configs.py` (the default is `BlueStacks Air`; change it for other emulator instance names).
 
     __MuMu Player:__
     * Currently, ONLY supported on Windows
@@ -82,7 +82,7 @@
     
     > ❗️ __Important__: If hosting from a personal device, configure port forwarding as necessary
     
-    * Each bot instance can be accessed at `WEB_APP_URL/<instance_id>` (the default instance ID is `main`)
+    * Each bot instance can be accessed at `WEB_APP_URL/instances/<instance_id>` (the default instance ID is `BlueStacks Air`)
     * View a demo of the web app [here](#web-app-demo)
 
 1. Setup iPhone shortcut:

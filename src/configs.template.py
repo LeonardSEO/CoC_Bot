@@ -18,7 +18,7 @@ LOCAL_OCR_BACKEND = "auto" # "auto", "apple_vision", or "easyocr"
 
 # OPTIONAL: Typed Jev decisions via OpenRouter. Keep OPENROUTER_API_KEY in the
 # process environment; never store it here or in a packaged desktop app.
-JEV_MODE = "off" # "off", "shadow" (advice only), or "active"
+JEV_MODE = "shadow" # "off", "shadow" (advice only), or "active"
 JEV_MODEL = "typesafe/jev-1.13"
 JEV_OBJECTIVE = "farm_and_upgrade" # or "trophies"
 JEV_UPGRADES = True
@@ -45,8 +45,8 @@ JEV_MAX_SKIPS = 10
 JEV_MAX_SEARCH_SECONDS = 25
 
 # REQUIRED: Instance Settings
-INSTANCE_IDS = ["main"]
-DEFAULT_INSTANCE_ID = INSTANCE_IDS[0]
+INSTANCE_IDS = ["BlueStacks Air"]
+DEFAULT_INSTANCE_ID = "BlueStacks Air"
 
 # REQUIRED: General Settings
 LOCAL_GUI = True # web app not required
