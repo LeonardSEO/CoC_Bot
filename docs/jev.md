@@ -297,8 +297,8 @@ Upgrade choices use a fresh right-hand price-column observation, reject red or
 unreadable prices, remove duplicate rows and recheck before clicking. A fresh
 confirmation gets a separate red-price guard in off/shadow/active modes. Colour
 indicators are heuristic evidence: numerical upgrade cost and bank balance remain
-explicitly unknown. Walls with unverified results end that upgrade cycle instead
-of being retried repeatedly. Jev cannot repair incorrect observations and shadow
+explicitly unknown. Wall success is observed separately from builder counts; see the grouped wall
+flow below. Jev cannot repair incorrect observations and shadow
 mode remains advisory.
 
 An optional read-only inventory can record UI version, local OCR, template
@@ -320,3 +320,36 @@ levels, resource balances, upgrade prices/durations, current army), extracted fr
 validated regions. Automatic template replacement or execution of speculative
 model actions is not enabled. Image-capable decision providers require verification
 of their actual API contract and fixtures before integration.
+
+
+## Grouped wall upgrades
+
+`WALL_GROUP_UPGRADES = True` defaults to attempting the native Select Row action
+when the exact selected upgrade is Wall. Normal upgrade priorities are preserved:
+walls are not promoted ahead of heroes/buildings. If all builders are busy or
+reserved, the building loop can still run a wall-only route, limited to walls
+explicitly listed in that village's configured priority list. Non-wall upgrades
+remain subject to builder availability.
+
+Selection requires an exact local OCR wall name and both OCR plus a fresh OpenCV
+match of Select Row in the action area. If the control is absent, the bot retains
+the single-wall flow. The grouped upgrade still passes the fresh confirmation
+name and red-price guards; a red total cost never triggers resource top-ups or
+shop purchases. Actual selected count and numerical total price are not inferred.
+There is no partial-row splitting when a full row is too expensive.
+
+The bot compares explicitly observed Wall Level labels before/after upgrading.
+A confirmed increase permits another attempt within MAX_UPGRADES_PER_CHECK;
+unchanged/unknown levels end the cycle and are logged accordingly. This does not
+claim every member of a mixed-level group upgraded. New Select Row templates are
+synthetically tested, but require real macOS/gameplay validation. No live native
+screen matching or group execution has been verified in this environment.
+
+
+The local UI inventory from Clash 18.600.7 confirmed the existing Confirm template
+still matches (~0.999) and the village slash matches (~0.949); low scores for
+controls absent from a screen are expected. Its full-screen SHOP text hint does
+not prove the shop is open: normal village/upgrade dialogs retain that footer.
+The gesture guard now treats a strongly anchored ordinary upgrade confirmation
+like the village, inspecting the modal centre without its Shop footer. The guard
+still blocks detected payment/resource-top-up text and non-Clash overlays.
