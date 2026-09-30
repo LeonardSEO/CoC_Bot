@@ -9,13 +9,13 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src'))
-from automation_safety import AutomationStopped, PortraitFrame, raw_touch, validate_frame
+from automation_safety import AutomationStopped, PortraitFrame, BlackFrame, raw_touch, validate_frame
 
 
 def load(names, namespace):
     tree = ast.parse((ROOT / 'src/utils.py').read_text())
     nodes = [n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.ClassDef)) and n.name in names]
-    namespace.update(AutomationStopped=AutomationStopped, PortraitFrame=PortraitFrame, raw_touch=raw_touch, validate_frame=validate_frame)
+    namespace.update(AutomationStopped=AutomationStopped, PortraitFrame=PortraitFrame, BlackFrame=BlackFrame, raw_touch=raw_touch, validate_frame=validate_frame)
     exec(compile(ast.Module(body=nodes, type_ignores=[]), 'utils.py', 'exec'), namespace)
     return namespace
 
@@ -65,6 +65,35 @@ class StartupTests(unittest.TestCase):
             context['start_coc'](timeout=3,detailed=True)
         context['get_home_builders'].assert_not_called()
         self.assertEqual(context['Input_Handler'].mock_calls,[])
+
+
+    def test_black_loading_waits_for_valid_village_without_inputs(self):
+        context = self.context(home=True)
+        context['Frame_Handler'].get_frame.side_effect = [BlackFrame('black'), BlackFrame('black'), None]
+        with patch('time.time', side_effect=[0,0,1,2]), patch('time.sleep') as sleep:
+            self.assertEqual(context['start_coc'](timeout=3, detailed=True), (True,'running'))
+        self.assertEqual(sleep.call_count, 2)
+        context['get_home_builders'].assert_called_once()
+        self.assertEqual(context['Input_Handler'].mock_calls, [])
+        self.assertEqual(context['logger'].info.call_args_list.count(unittest.mock.call('Waiting for Clash loading frames to become a recognizable village...')), 1)
+
+    def test_persistent_black_loading_stops_at_deadline_without_hud_or_inputs(self):
+        context = self.context(home=True)
+        context['Frame_Handler'].get_frame.side_effect = BlackFrame('black')
+        with patch('time.time', side_effect=[0,0,1,4]), patch('time.sleep'), self.assertRaises(AutomationStopped):
+            context['start_coc'](timeout=3, detailed=True)
+        context['get_home_builders'].assert_not_called()
+        self.assertEqual(context['Input_Handler'].mock_calls, [])
+        self.assertNotIn('location', context['TEMP_CACHE'])
+
+    def test_startup_does_not_retry_other_capture_failures(self):
+        context = self.context(home=True)
+        context['Frame_Handler'].get_frame.side_effect = AutomationStopped('Invalid screenshot')
+        with patch('time.sleep') as sleep, self.assertRaises(AutomationStopped):
+            context['start_coc'](detailed=True)
+        sleep.assert_not_called()
+        context['get_home_builders'].assert_not_called()
+        self.assertEqual(context['Input_Handler'].mock_calls, [])
 
     def test_stale_cached_location_does_not_authorize_navigation(self):
         for function in ('to_home_base','to_builder_base'):
@@ -121,6 +150,33 @@ class FrameTests(unittest.TestCase):
         namespace = load({'Frame_Handler'}, {'ADB_Manager':SimpleNamespace(adbutils_device=device),'WINDOW_DIMS':(1920,1080)})
         namespace['Frame_Handler'].cached_frame = np.ones((1080,1920,3),dtype=np.uint8)
         with self.assertRaises(AutomationStopped): namespace['Frame_Handler'].get_frame()
+        self.assertIsNone(namespace['Frame_Handler'].cached_frame)
+
+
+    def test_black_gameplay_capture_stops_and_cannot_reuse_cached_frame(self):
+        device = Mock()
+        device.screenshot.side_effect = [np.zeros((1080,1920,3),dtype=np.uint8), np.ones((1080,1920,3),dtype=np.uint8)]
+        namespace = load({'Frame_Handler'}, {'ADB_Manager':SimpleNamespace(adbutils_device=device),'WINDOW_DIMS':(1920,1080)})
+        handler = namespace['Frame_Handler']
+        handler.cached_frame = np.ones((1080,1920,3),dtype=np.uint8)
+        with self.assertRaises(BlackFrame):
+            handler.get_frame()
+        self.assertIsNone(handler.cached_frame)
+        # Explicit cached request must capture anew after the invalid observation.
+        handler.get_frame(use_cached=True)
+        self.assertEqual(device.screenshot.call_count, 2)
+
+    def test_real_black_startup_capture_then_village_is_retried_without_inputs(self):
+        device = Mock()
+        device.screenshot.side_effect = [np.zeros((1080,1920,3),dtype=np.uint8), np.ones((1080,1920,3),dtype=np.uint8)]
+        handler = load({'Frame_Handler'}, {'ADB_Manager':SimpleNamespace(adbutils_device=device),'WINDOW_DIMS':(1920,1080)})['Frame_Handler']
+        context = StartupTests().context(home=True)
+        context['Frame_Handler'] = handler
+        with patch('time.sleep'):
+            self.assertEqual(context['start_coc'](detailed=True), (True,'running'))
+        self.assertEqual(device.screenshot.call_count, 2)
+        context['get_home_builders'].assert_called_once()
+        self.assertEqual(context['Input_Handler'].mock_calls, [])
 
 
 class TouchTests(unittest.TestCase):

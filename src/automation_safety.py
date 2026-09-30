@@ -10,6 +10,10 @@ class PortraitFrame(AutomationStopped):
     """A loading screen may be portrait; gameplay must never use this frame."""
 
 
+class BlackFrame(AutomationStopped):
+    """An empty loading capture may be retried only by the startup loop."""
+
+
 def validate_frame(frame, expected):
     import numpy as np
     if frame.ndim != 3 or frame.shape[2] < 3:
@@ -20,7 +24,7 @@ def validate_frame(frame, expected):
             raise PortraitFrame('Android is still in portrait; waiting for the landscape village')
         raise AutomationStopped(f'Screenshot is {width}x{height}; expected {expected[0]}x{expected[1]}. Set the Android display resolution before restarting.')
     if not np.any(frame):
-        raise AutomationStopped('Black screenshot; automation stopped')
+        raise BlackFrame('Black screenshot; automation stopped')
 
 
 def raw_touch(x, y, width, height, rotation):
