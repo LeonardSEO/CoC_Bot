@@ -1474,8 +1474,16 @@ class Input_Handler:
             frame = Frame_Handler.get_frame(grayscale=False)
             village = (get_home_builders(0, return_amount=False, use_cached_frame=True)
                        or get_builder_builders(0, return_amount=False, use_cached_frame=True))
-            if village:
-                if x is not None and y is not None:
+            # A normal upgrade dialog also leaves the village Shop footer
+            # visible (verified on Clash 18.600.7). Its anchored Confirm control
+            # distinguishes it from an unknown shop/payment screen.
+            upgrade_dialog = False
+            if not village:
+                cx, cy = Frame_Handler.locate(Asset_Manager.upgrader_assets['confirm'], frame=frame,
+                                              grayscale=False, thresh=.9)
+                upgrade_dialog = cx is not None and cy is not None
+            if village or upgrade_dialog:
+                if village and x is not None and y is not None:
                     x = 1+x if x < 0 else x
                     y = 1+y if y < 0 else y
                     if (x >= .85 and y >= .80) or (x >= .80 and y <= .25):
