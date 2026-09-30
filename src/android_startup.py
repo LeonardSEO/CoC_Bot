@@ -38,7 +38,7 @@ def open_bluestacks():
     raise RuntimeError("BlueStacks could not be opened; check its installation")
 
 
-def ensure_android(adb, address=None, instance="BlueStacks Air", start=True, timeout=60):
+def ensure_android(adb, address=None, instance="BlueStacks Air", start=True, timeout=60, wait=False):
     """Connect to an existing emulator or launch it and wait, without touches."""
     if address is None:
         address = bluestacks_address(instance) if DEFAULT_CONFIG.exists() else "127.0.0.1:5555"
@@ -51,9 +51,9 @@ def ensure_android(adb, address=None, instance="BlueStacks Air", start=True, tim
                 return address
         except Exception:
             pass
-        if not start:
+        if not start and not wait:
             raise ConnectionError(f"No connected Android device at {address}")
-        if not opened:
+        if start and not opened:
             open_bluestacks()
             opened = True
         if time.monotonic() >= deadline:
