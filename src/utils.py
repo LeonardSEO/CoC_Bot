@@ -786,8 +786,12 @@ class _Emulator_Manager:
 
     @classmethod
     def init(cls):
-        Exit_Handler.register(cls.stop)
-        cls.restart()
+        # Starting an existing emulator must not forcibly restart it or close
+        # it when this worker exits. Emulator management remains opt-in.
+        cls.start()
+        import adbutils
+        from android_startup import ensure_android
+        ensure_android(adbutils.adb, address=cls.adb_address, start=False, wait=True)
 
     @classmethod
     def check(cls):
