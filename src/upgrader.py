@@ -1,4 +1,5 @@
 from utils import *
+from upgrade_prices import price_status, red_price_mask
 try:
     import configs
     from configs import *
@@ -25,13 +26,28 @@ class Upgrader:
         except Exception:
             self._pending_jev_upgrade = None
             self.decisions.record('fallback', kind='upgrade', reason='upgrade_observation_error')
-            return legacy
+            return (None, None, None) if len(legacy) > 2 else (None, None)
 
     def _observe_jev_upgrade(self, locations, legacy, menu_left, menu_right, context, discounted=False):
         """Observe existing locator results without adding menu clicks or scrolls."""
         import re, time
         from jev.upgrades import UpgradeCandidate, choose_upgrade
         settings = self.decisions.settings
+        empty = (None, None, None) if len(legacy) > 2 else (None, None)
+        frame = Frame_Handler.get_frame(grayscale=False)
+        verified = []
+        for location in locations:
+            section = Frame_Handler.crop(frame, menu_left, location[1]-.025, menu_right, location[1]+.025)
+            status = price_status(section)
+            if status is not True:
+                self.decisions.record('upgrade_rejected', context=context, reason='red_price' if status is False else 'price_unreadable')
+                continue
+            if not any(abs(location[1]-other[1]) < .006 for other in verified):
+                verified.append(location)
+        locations = verified
+        if not locations:
+            return empty
+        legacy = next((location for location in locations if abs(location[1]-legacy[1]) < .006), locations[0])
         if settings.mode == 'off' or not settings.upgrades or len(locations) < 2:
             return legacy
         observed_at = time.time()
@@ -51,7 +67,7 @@ class Upgrader:
                 texts = OCR_Handler.get_text(section)
                 cleaned = [re.sub(r'\s*x\d+$', '', text.strip().lower()) for text in texts]
                 name = next((canonical[text] for text in cleaned if text in canonical), None)
-            rows.append(UpgradeCandidate(name or 'unknown', float(x), float(y), discounted=discounted, quality=.8 if name else 0, observed_at=observed_at))
+            rows.append(UpgradeCandidate(name or 'unknown', float(x), float(y), affordable=True, affordability_source='fresh_menu_price_colour', discounted=discounted, quality=.8 if name else 0, observed_at=observed_at))
         legacy_row = next((row for row in rows if abs(row.y-legacy[1]) < .001), None)
         if legacy_row is None:
             return legacy
@@ -64,12 +80,20 @@ class Upgrader:
         section = Frame_Handler.crop(frame, menu_left, selected.y-.025, menu_right, selected.y+.025)
         template = render_text(selected.name, 'CCBackBeat', 27)
         x, y = Frame_Handler.locate(template, section, ref='lc', thresh=.80)
-        if x is None or y is None or check_color((255, 136, 127), section, tol=10):
+        if x is None or y is None or price_status(section) is not True:
             self.decisions.record('fallback', kind='upgrade', reason='chosen_row_changed')
             return (None, None, None) if len(legacy) > 2 else (None, None)
         self._pending_jev_upgrade = {'name': selected.name, 'context': context,
             'hero': selected.name.lower() in [name.lower() for name in Cache_Manager.get('vocab', {}).get('heroes', [])]}
         return (selected.x, selected.y, selected.name) if len(legacy) > 2 else (selected.x, selected.y)
+
+    def _row_price_allowed(self, menu_left, y, menu_right):
+        frame = Frame_Handler.get_frame(grayscale=False)
+        section = Frame_Handler.crop(frame, menu_left, y-.025, menu_right, y+.025)
+        status = price_status(section)
+        if status is not True:
+            self.decisions.record('upgrade_rejected', reason='red_price' if status is False else 'price_unreadable')
+        return status is True
 
     def _jev_confirmation_name(self, frame):
         """Read an anchored dialog title exactly; fuzzy vocabulary is not proof."""
@@ -127,25 +151,34 @@ class Upgrader:
             timeout=timeout
         )
 
+    def _confirmation_price_allowed(self, frame, x, y):
+        # Inspect the localized price/confirmation area, never the whole village.
+        import numpy as np
+        section = Frame_Handler.crop(frame, max(0, x-.10), max(0, y-.10), min(1, x+.10), min(1, y+.04))
+        if np.count_nonzero(red_price_mask(section)) >= 4:
+            self.decisions.record('upgrade_rejected', reason='red_confirmation_price')
+            return False
+        return True
+
     def _click_home_confirm(self, timeout=5):
-        if self._pending_jev_upgrade is None:
-            return click_with_timeout(lambda: Frame_Handler.locate(self.assets['confirm'], grayscale=False, thresh=.85, use_cached=True), timeout=timeout)
         def locate():
             frame = Frame_Handler.get_frame(grayscale=False)
             if not self._verify_jev_confirmation(frame): return None, None
-            return Frame_Handler.locate(self.assets['confirm'], frame=frame, grayscale=False, thresh=.85)
+            x, y = Frame_Handler.locate(self.assets['confirm'], frame=frame, grayscale=False, thresh=.85)
+            if x is None or y is None: return None, None
+            return (x, y) if self._confirmation_price_allowed(frame, x, y) else (None, None)
         try:
             return click_with_timeout(locate, timeout=timeout)
         finally:
             self._pending_jev_upgrade = None
 
     def _click_builder_confirm(self, timeout=5):
-        if self._pending_jev_upgrade is None:
-            return click_with_timeout(lambda: self._find_builder_confirm(), timeout=timeout)
         def locate():
             frame = Frame_Handler.get_frame(grayscale=False)
             if not self._verify_jev_confirmation(frame): return None, None
-            return self._find_builder_confirm(frame=frame)
+            x, y = self._find_builder_confirm(frame=frame)
+            if x is None or y is None: return None, None
+            return (x, y) if self._confirmation_price_allowed(frame, x, y) else (None, None)
         try:
             return click_with_timeout(locate, timeout=timeout)
         finally:
@@ -310,15 +343,17 @@ class Upgrader:
             return bounds, centers
         
         menu_white = (filter_color([255, 255, 255], menu, tol=0, return_mask=True)[1])
-        menu_red = filter_color((255, 136, 127), menu, tol=10, return_mask=True)[1]
+        menu_red = red_price_mask(menu[:, int(menu.shape[1]*.55):])
         white_profile = np.where(menu_white.mean(axis=1) > 0.01, 1, 0)
-        red_profile = np.where(menu_red.mean(axis=1) > 0.01, 1, 0)
+        red_profile = np.where(menu_red.sum(axis=1) >= 2, 1, 0)
         white_bounds, white_centers = profile_bounds(white_profile)
         red_bounds, red_centers = profile_bounds(red_profile)
         potential_y_locs = [] # in pixels
         for wc in white_centers:
-            if len(red_centers) == 0 or abs(red_centers - wc).min() > 12.5:
-                potential_y_locs.append(wc)
+            if len(red_centers) == 0 or abs(red_centers - wc).min() > 25:
+                row = menu[max(0, int(wc)-25):min(menu.shape[0], int(wc)+25)]
+                if price_status(row) is True:
+                    potential_y_locs.append(wc)
         return np.array(potential_y_locs)
 
     def _find_builder_confirm(self, frame=None):
@@ -476,6 +511,7 @@ class Upgrader:
                 dir="down" if configs.START_FROM_MENU_TOP else "up",
             )
             if x_upgrade is None or y_upgrade is None: return None
+            if not self._row_price_allowed(menu_left, y_upgrade, menu_right): return None
             Input_Handler.click(x_upgrade, y_upgrade)
             time.sleep(0.5)
             
@@ -551,7 +587,7 @@ class Upgrader:
                     for x, y in items:
                         if x is not None and y is not None and (y_sug is None or (y_sug is not None and y > y_sug)):
                             section = Frame_Handler.crop(frame, menu_left, y-0.02, menu_right, y+0.02)
-                            sufficient_resources = not check_color((255, 136, 127), section, tol=10)
+                            sufficient_resources = price_status(section) is True
                             if sufficient_resources:
                                 # Check that located upgrade name is left aligned
                                 if abs(x - menu_left) < 0.01:
@@ -579,6 +615,7 @@ class Upgrader:
             )
             
             if x is None or y is None: return None
+            if not self._row_price_allowed(menu_left, y, menu_right): return None
             Input_Handler.click(x_sug, y)
             time.sleep(0.5)
             
@@ -717,6 +754,7 @@ class Upgrader:
                 dir="down" if configs.START_FROM_MENU_TOP else "up",
             )
             if x_upgrade is None or y_upgrade is None: return None
+            if not self._row_price_allowed(menu_left, y_upgrade, menu_right): return None
             Input_Handler.click(x_upgrade, y_upgrade)
             time.sleep(0.5)
             
@@ -777,7 +815,7 @@ class Upgrader:
                 for (x, y), name in zip(xys, upgrade_text):
                     if x is not None and y is not None and (y_sug is None or (y_sug is not None and y > y_sug)):
                         section = Frame_Handler.crop(frame, menu_left, y-0.02, menu_right, y+0.02)
-                        sufficient_resources = not check_color((255, 136, 127), section, tol=10)
+                        sufficient_resources = price_status(section) is True
                         if sufficient_resources:
                             # Check that located upgrade name is left aligned
                             if abs(x - menu_left) < 0.01:
@@ -811,6 +849,7 @@ class Upgrader:
             )
             
             if x is None or y is None: return None
+            if not self._row_price_allowed(menu_left, y, menu_right): return None
             Input_Handler.click(x, y)
             time.sleep(0.5)
             
@@ -953,6 +992,7 @@ class Upgrader:
             upgrade_name = spell_check(re.sub(r"\s*x\d+$", "", OCR_Handler.get_text(section)[0].lower()), ["buildings/builder-base", "traps/builder-base"], phrase_level=True)
             
             # Select upgrade
+            if not self._row_price_allowed(menu_left, y_upgrade, menu_right): return None
             Input_Handler.click(x_upgrade, y_upgrade)
             
             # Exit upgrade menu
@@ -1012,7 +1052,7 @@ class Upgrader:
                 for (x, y), name in zip(xys, upgrade_text):
                     if x is not None and y is not None and (y_sug is None or (y_sug is not None and y > y_sug)):
                         section = Frame_Handler.crop(frame, menu_left, y-0.02, menu_right, y+0.02)
-                        sufficient_resources = not check_color((255, 136, 127), section, tol=10)
+                        sufficient_resources = price_status(section) is True
                         if sufficient_resources:
                             # Check that located upgrade name is left aligned
                             if abs(x - menu_left) < 0.01:
@@ -1039,6 +1079,7 @@ class Upgrader:
             )
             
             if x is None or y is None: return None
+            if not self._row_price_allowed(menu_left, y, menu_right): return None
             Input_Handler.click(x, y)
             time.sleep(0.5)
             
@@ -1131,6 +1172,7 @@ class Upgrader:
             upgrade_name = spell_check(re.sub(r"\s*x\d+$", "", OCR_Handler.get_text(section)[0].lower()), "troops", phrase_level=True)
             
             # Select upgrade
+            if not self._row_price_allowed(menu_left, y_upgrade, menu_right): return None
             Input_Handler.click(x_upgrade, y_upgrade)
             
             # Click confirm button
@@ -1184,7 +1226,7 @@ class Upgrader:
                 for (x, y), name in zip(xys, upgrade_text):
                     if x is not None and y is not None and (y_sug is None or (y_sug is not None and y > y_sug)):
                         section = Frame_Handler.crop(frame, menu_left, y-0.02, menu_right, y+0.02)
-                        sufficient_resources = not check_color((255, 136, 127), section, tol=10)
+                        sufficient_resources = price_status(section) is True
                         if sufficient_resources:
                             # Check that located upgrade name is left aligned
                             if abs(x - menu_left) < 0.01:
@@ -1217,6 +1259,7 @@ class Upgrader:
             )
             
             if x is None or y is None: return None
+            if not self._row_price_allowed(menu_left, y, menu_right): return None
             Input_Handler.click(x, y)
             
             # Find confirm button
@@ -1265,6 +1308,9 @@ class Upgrader:
                         duration_seconds=time.monotonic()-upgrade_started)
                     if upgraded is not None:
                         upgraded = upgraded.lower()
+                        if upgraded == 'wall':
+                            self.decisions.record('upgrade_cycle_stopped', reason='wall_result_unverified')
+                            break
                         if final_builders < initial_builders: upgrades_started.append(upgraded)
                         elif final_builders == initial_builders and upgraded != "wall": break
                     else: break
@@ -1318,6 +1364,9 @@ class Upgrader:
                         duration_seconds=time.monotonic()-upgrade_started)
                     if upgraded is not None:
                         upgraded = upgraded.lower()
+                        if upgraded == 'wall':
+                            self.decisions.record('upgrade_cycle_stopped', reason='wall_result_unverified')
+                            break
                         if final_builders < initial_builders: upgrades_started.append(upgraded)
                         elif final_builders == initial_builders and upgraded != "wall": break
                     else: break
