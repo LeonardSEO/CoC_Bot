@@ -23,6 +23,24 @@ class PurchaseTests(unittest.TestCase):
             self.assertIsNone(purchase_reason([text]))
             reject_purchase_text([text])
 
+    def test_game_footer_and_resource_icon_ocr_do_not_fake_payment(self):
+        for texts in [('SHOP',),('Winkel',),('£24','Wall Level 12'),('SHOP','With the Gold Pass you could save up to:','300000')]:
+            self.assertIsNone(purchase_reason(texts,trusted_game_screen=True))
+        self.assertEqual(purchase_reason(['SHOP']), 'shop_label')
+
+    def test_real_prices_and_purchase_actions_still_block_recognized_game(self):
+        for texts in [('SHOP','€4,99'),('£ 4.99',),('9.99 $',),('USD 5',),('Buy Gems',),('Google Play',),('Missing Resources',)]:
+            self.assertIsNotNone(purchase_reason(texts,trusted_game_screen=True))
+
+    def test_trusted_village_does_not_stop_on_footer_or_integer_resource_icon(self):
+        handler,ns = self.handler(village=True,texts=('SHOP','£24','Suggested upgrades'))
+        handler._guard_purchase(.5,.4)
+        ns['OCR_Handler'].local_ocr.assert_called_once()
+
+    def test_unknown_shop_screen_is_still_blocked(self):
+        handler,ns = self.handler(texts=('SHOP',))
+        with self.assertRaises(AutomationStopped): handler._guard_purchase(.5,.8)
+
     def test_empty_ocr_fails_closed(self):
         with self.assertRaises(AutomationStopped): reject_purchase_text([])
 
