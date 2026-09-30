@@ -56,6 +56,7 @@ def main():
     output = Path(args.output)
     archive_diagnostics(output)
     import adbutils
+    deadline = time.monotonic() + args.wait_seconds
     try:
         address = ensure_android(adbutils.adb, address=args.address, instance=args.instance,
                                  start=not args.no_start, timeout=args.wait_seconds)
@@ -67,7 +68,7 @@ def main():
             result = device.shell(["am", "start", "-W", "-n", ACTIVITY])
             if "Error:" in result or "Exception" in result:
                 raise RuntimeError("Android could not open Clash; open it manually")
-            image, info = wait_for_village(device, observe, timeout=args.wait_seconds)
+            image, info = wait_for_village(device, observe, timeout=max(0, deadline - time.monotonic()))
         else:
             image = device.screenshot(error_ok=False)
             info = observe(device, image)
