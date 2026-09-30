@@ -1492,8 +1492,9 @@ class Input_Handler:
                 # too, excluding the normal Shop label in the village footer.
                 from purchase_safety import purchase_reason
                 centre = Frame_Handler.crop(frame, .1, .12, .9, .8)
-                if purchase_reason(OCR_Handler.local_ocr(centre)):
-                    raise AutomationStopped('Purchase guard: shop/payment modal detected')
+                reason = purchase_reason(OCR_Handler.local_ocr(centre), trusted_game_screen=True)
+                if reason:
+                    raise AutomationStopped(f'Purchase guard: {reason} detected on recognized game screen')
                 return
             reject_purchase_text(OCR_Handler.local_ocr(frame))
         except (KeyboardInterrupt, SystemExit):

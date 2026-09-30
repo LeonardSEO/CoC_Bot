@@ -353,3 +353,12 @@ not prove the shop is open: normal village/upgrade dialogs retain that footer.
 The gesture guard now treats a strongly anchored ordinary upgrade confirmation
 like the village, inspecting the modal centre without its Shop footer. The guard
 still blocks detected payment/resource-top-up text and non-Clash overlays.
+
+
+Purchase text rules distinguish a recognized village/upgrade dialog from an
+unknown screen. A standalone SHOP/Winkel footer or an OCR resource icon read as
+£24 does not classify a recognized game screen as a payment modal. Formatted real
+money prices, explicit purchase/payment actions, resource top-ups and non-Clash
+payment overlays still stop inputs. Unknown screens retain strict currency and
+shop-label rules. Stops now include the decision category, without private OCR
+text, so false positives can be investigated from logs.
