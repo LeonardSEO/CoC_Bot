@@ -8,8 +8,10 @@ from attacker import Attacker
 
 class CoC_Bot:
     def __init__(self):
-        self.upgrader = Upgrader()
-        self.attacker = Attacker()
+        from jev.runtime import create_service
+        self.decisions = create_service(configs)
+        self.upgrader = Upgrader(decisions=self.decisions)
+        self.attacker = Attacker(decisions=self.decisions)
     
     def run(self):
         import time

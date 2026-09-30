@@ -70,14 +70,15 @@ def init_instance(id):
             logger.exception("init_instance:")
 
 def disable_sleep():
-    import sys, subprocess, ctypes, os, shutil
+    import sys, subprocess, ctypes, os, shutil, json, shlex
     
     if sys.platform == "darwin":
         sleep_helper_temp = Path(__file__).parent / "sleep_helper.sh"
         sleep_helper_permanent = APP_DATA_DIR / "sleep_helper.sh"
         shutil.copyfile(sleep_helper_temp, sleep_helper_permanent)
         os.chmod(sleep_helper_permanent, 0o755)
-        cmd = f'do shell script "{sleep_helper_permanent} {os.getpid()}" with administrator privileges'
+        shell_command = shlex.join([str(sleep_helper_permanent), str(os.getpid())])
+        cmd = f'do shell script {json.dumps(shell_command, ensure_ascii=False)} with administrator privileges'
         subprocess.Popen(
             ["osascript", "-e", cmd],
             stdout=subprocess.DEVNULL,
@@ -1187,6 +1188,7 @@ class Task_Handler:
 class OCR_Handler:
     
     backoff_time = 0
+    vision_backoff_time = 0
     
     @classmethod
     def get_text(cls, frame):
@@ -1200,6 +1202,19 @@ class OCR_Handler:
 
     @classmethod
     def local_ocr(cls, frame):
+        import time
+        backend = getattr(configs, 'LOCAL_OCR_BACKEND', 'auto')
+        if backend not in {'auto', 'apple_vision', 'easyocr'}:
+            raise ValueError('LOCAL_OCR_BACKEND must be auto, apple_vision or easyocr')
+        if sys.platform == 'darwin' and backend != 'easyocr' and time.monotonic() >= cls.vision_backoff_time:
+            try:
+                from local_ocr import apple_vision_text
+                return apple_vision_text(frame)
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except Exception as exc:
+                cls.vision_backoff_time = time.monotonic() + 600
+                logger.warning('Apple Vision unavailable ({}); using local EasyOCR for 600 seconds', type(exc).__name__)
         if not hasattr(cls, 'reader'):
             import easyocr
             cls.reader = easyocr.Reader(['en'], gpu=True)

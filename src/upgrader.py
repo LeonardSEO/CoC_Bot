@@ -7,9 +7,103 @@ except:
     from configs_build import *
 
 class Upgrader:
-    def __init__(self):
+    def __init__(self, decisions=None):
         self.assets = Asset_Manager.upgrader_assets
         self.misc_assets = Asset_Manager.misc_assets
+        if decisions is None:
+            from jev.runtime import create_service
+            decisions = create_service(configs)
+        self.decisions = decisions
+        self._pending_jev_upgrade = None
+        self._jev_availability = {'builders': None, 'lab_available': None}
+
+    def _choose_jev_upgrade(self, locations, legacy, menu_left, menu_right, context, discounted=False):
+        try:
+            return self._observe_jev_upgrade(locations, legacy, menu_left, menu_right, context, discounted)
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception:
+            self._pending_jev_upgrade = None
+            self.decisions.record('fallback', kind='upgrade', reason='upgrade_observation_error')
+            return legacy
+
+    def _observe_jev_upgrade(self, locations, legacy, menu_left, menu_right, context, discounted=False):
+        """Observe existing locator results without adding menu clicks or scrolls."""
+        import re, time
+        from jev.upgrades import UpgradeCandidate, choose_upgrade
+        settings = self.decisions.settings
+        if settings.mode == 'off' or not settings.upgrades or len(locations) < 2:
+            return legacy
+        observed_at = time.time()
+        known = set()
+        for values in Cache_Manager.get('vocab', {}).values():
+            known.update(values)
+        for key in ('HOME_BASE_UPGRADE_PRIORITY', 'HOME_LAB_UPGRADE_PRIORITY', 'BUILDER_BASE_UPGRADE_PRIORITY', 'BUILDER_LAB_UPGRADE_PRIORITY'):
+            for group in getattr(configs, key, []):
+                known.update(group)
+        canonical = {name.lower(): name for name in known}
+        rows = []
+        for location in locations:
+            x, y = location[:2]
+            name = location[2] if len(location) > 2 else None
+            if name is None:
+                section = Frame_Handler.get_frame_section(menu_left, y-.025, (menu_left+menu_right)/2, y+.025, high_contrast=True, use_cached=True)
+                texts = OCR_Handler.get_text(section)
+                cleaned = [re.sub(r'\s*x\d+$', '', text.strip().lower()) for text in texts]
+                name = next((canonical[text] for text in cleaned if text in canonical), None)
+            rows.append(UpgradeCandidate(name or 'unknown', float(x), float(y), discounted=discounted, quality=.8 if name else 0, observed_at=observed_at))
+        legacy_row = next((row for row in rows if abs(row.y-legacy[1]) < .001), None)
+        if legacy_row is None:
+            return legacy
+        availability = self._jev_availability.copy()
+        selected = choose_upgrade(self.decisions, rows, legacy_row, context, availability)
+        if settings.mode != 'active' or any(row.quality < settings.min_quality for row in rows):
+            return legacy
+        # Reacquire the name at the chosen row; old menu coordinates never suffice.
+        frame = Frame_Handler.get_frame(grayscale=False)
+        section = Frame_Handler.crop(frame, menu_left, selected.y-.025, menu_right, selected.y+.025)
+        template = render_text(selected.name, 'CCBackBeat', 27)
+        x, y = Frame_Handler.locate(template, section, ref='lc', thresh=.80)
+        if x is None or y is None or check_color((255, 136, 127), section, tol=10):
+            self.decisions.record('fallback', kind='upgrade', reason='chosen_row_changed')
+            return (None, None, None) if len(legacy) > 2 else (None, None)
+        self._pending_jev_upgrade = {'name': selected.name, 'context': context,
+            'hero': selected.name.lower() in [name.lower() for name in Cache_Manager.get('vocab', {}).get('heroes', [])]}
+        return (selected.x, selected.y, selected.name) if len(legacy) > 2 else (selected.x, selected.y)
+
+    def _jev_confirmation_name(self, frame):
+        """Read an anchored dialog title exactly; fuzzy vocabulary is not proof."""
+        import re
+        x, y = Frame_Handler.locate(self.assets['upgrade_name'], frame=frame, ref='lc', thresh=.9)
+        if x is None or y is None:
+            return None
+        section = Frame_Handler.crop(frame, x+.122, y-.04, 1-x, y+.035)
+        texts = OCR_Handler.get_text(Frame_Handler.high_contrast(section, thresh=255))
+        name = ' '.join(texts).strip().lower()
+        name = re.sub(r'\s*x\d+$', '', name)
+        name = re.sub(r'\s+(?:to\s+)?(?:level\s*)?\(?\d+\)?\s*$', '', name)
+        return name
+
+    def _verify_jev_confirmation(self, frame=None):
+        pending = self._pending_jev_upgrade
+        if pending is None:
+            return True
+        context = pending['context']
+        if Task_Handler.excluded(context) or (pending.get('hero') and Task_Handler.excluded('heroes')):
+            self.decisions.record('fallback', kind='upgrade', reason='excluded_before_confirmation')
+            return False
+        try:
+            if frame is None: frame = Frame_Handler.get_frame(grayscale=False)
+            actual = self._jev_confirmation_name(frame)
+            matches = actual is not None and actual.strip().lower() == pending['name'].strip().lower()
+            if not matches:
+                self.decisions.record('fallback', kind='upgrade', reason='confirmation_name_mismatch')
+            return matches
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception:
+            self.decisions.record('fallback', kind='upgrade', reason='confirmation_unreadable')
+            return False
 
     # ============================================================
     # 📱 Screen Interaction
@@ -34,16 +128,28 @@ class Upgrader:
         )
 
     def _click_home_confirm(self, timeout=5):
-        return click_with_timeout(
-            lambda: Frame_Handler.locate(self.assets["confirm"], grayscale=False, thresh=0.85, use_cached=True),
-            timeout=timeout
-        )
+        if self._pending_jev_upgrade is None:
+            return click_with_timeout(lambda: Frame_Handler.locate(self.assets['confirm'], grayscale=False, thresh=.85, use_cached=True), timeout=timeout)
+        def locate():
+            frame = Frame_Handler.get_frame(grayscale=False)
+            if not self._verify_jev_confirmation(frame): return None, None
+            return Frame_Handler.locate(self.assets['confirm'], frame=frame, grayscale=False, thresh=.85)
+        try:
+            return click_with_timeout(locate, timeout=timeout)
+        finally:
+            self._pending_jev_upgrade = None
 
     def _click_builder_confirm(self, timeout=5):
-        return click_with_timeout(
-            lambda: self._find_builder_confirm(),
-            timeout=timeout
-        )
+        if self._pending_jev_upgrade is None:
+            return click_with_timeout(lambda: self._find_builder_confirm(), timeout=timeout)
+        def locate():
+            frame = Frame_Handler.get_frame(grayscale=False)
+            if not self._verify_jev_confirmation(frame): return None, None
+            return self._find_builder_confirm(frame=frame)
+        try:
+            return click_with_timeout(locate, timeout=timeout)
+        finally:
+            self._pending_jev_upgrade = None
 
     def _scroll_to_menu_bottom(self, menu_left, menu_right, menu_top, menu_bottom, max_scrolls=10):
         import numpy as np
@@ -211,11 +317,11 @@ class Upgrader:
                 potential_y_locs.append(wc)
         return np.array(potential_y_locs)
 
-    def _find_builder_confirm(self):
+    def _find_builder_confirm(self, frame=None):
         import cv2, numpy as np
         from scipy.ndimage import gaussian_filter1d
         thresh = 0.2
-        section = Frame_Handler.get_frame_section(0.0, 0.9, 1.0, 0.92, grayscale=False)
+        section = Frame_Handler.get_frame_section(0.0, 0.9, 1.0, 0.92, grayscale=False) if frame is None else Frame_Handler.crop(frame, 0.0, 0.9, 1.0, 0.92)
         section = cv2.cvtColor(section, cv2.COLOR_RGB2LAB).astype(np.float32)
         btn_color = cv2.cvtColor(np.array([[[189, 230, 76]]], dtype=np.uint8), cv2.COLOR_RGB2LAB).astype(np.float32)
         diff = np.linalg.norm((section - btn_color)/255, axis=2).mean(0)
@@ -265,6 +371,8 @@ class Upgrader:
     @require_exit()
     def home_random_upgrade(self):
         import time, numpy as np
+
+        self._pending_jev_upgrade = None
 
         try:
             # Open upgrade list menu
@@ -349,6 +457,9 @@ class Upgrader:
                     if town_hall_loc != -1 and min(abs(town_hall_loc[1] - potential_y_locs)) < 0.02:
                         x_upgrade, y_upgrade = menu_center, town_hall_loc[1]
                     else: return None, None
+                group = discounted_upgrades if len(discounted_upgrades) else valid_y_locs
+                if len(group) > 0:
+                    return self._choose_jev_upgrade([(menu_center, y) for y in group], (x_upgrade, y_upgrade), menu_left, menu_right, "home_base", discounted=bool(len(discounted_upgrades)))
                 return x_upgrade, y_upgrade
             
             # Choose an upgrade
@@ -367,7 +478,7 @@ class Upgrader:
             # Hero upgrades go directly to confirm screen now
             in_hero_hall = not get_home_builders(0, return_amount=False, raise_exception=False)
             if in_hero_hall:
-                if Task_Handler.excluded("heros"): return None
+                if Task_Handler.excluded("heroes"): return None
             else:
                 self._click_home_builders()
                 
@@ -395,6 +506,8 @@ class Upgrader:
     def home_specified_upgrade(self, upgrade_text):
         import time, numpy as np
         
+        self._pending_jev_upgrade = None
+
         try:
             # Render templates
             if type(upgrade_text) == str: upgrade_text = [upgrade_text]
@@ -402,7 +515,9 @@ class Upgrader:
                 upgrade_text = list(set(upgrade_text) - set(Cache_Manager.get("vocab", get_vocab())["heroes"]))
             if len(upgrade_text) == 0: return None
             templates = [render_text(text, "CCBackBeat", 27) for text in upgrade_text]
-            np.random.shuffle(templates)
+            combined = list(zip(templates, upgrade_text))
+            np.random.shuffle(combined)
+            templates, upgrade_text = zip(*combined)
             
             # Open upgrade list menu
             self._click_home_builders()
@@ -427,7 +542,8 @@ class Upgrader:
                 x_sug, y_sug = Frame_Handler.locate(sug_template, frame, thresh=0.70, grayscale=False)
                 res = Frame_Handler.batch_locate(templates, frame, thresh=0.80, ref="lc", return_all=True, grayscale=True)
                 non_discounted_upgrades = []
-                for items in res:
+                discounted_upgrades = []
+                for items, name in zip(res, upgrade_text):
                     for x, y in items:
                         if x is not None and y is not None and (y_sug is None or (y_sug is not None and y > y_sug)):
                             section = Frame_Handler.crop(frame, menu_left, y-0.02, menu_right, y+0.02)
@@ -435,16 +551,18 @@ class Upgrader:
                             if sufficient_resources:
                                 # Check that located upgrade name is left aligned
                                 if abs(x - menu_left) < 0.01:
-                                    non_discounted_upgrades.append((x, y))
+                                    non_discounted_upgrades.append((x, y, name))
                                     continue
 
                                 # Or if it is aligned to green discount tag
                                 tag_x, tag_y = Frame_Handler.locate(self.assets["green_tag"], section, thresh=0.80, grayscale=False, ref="rc", normalize=False)
                                 if tag_x is not None and tag_y is not None and abs(x - (menu_left + tag_x/WINDOW_DIMS[1])) < 0.02:
-                                    return x, y # Prioritize discounted upgrades
+                                    discounted_upgrades.append((x, y, name)) # Prioritize discounted upgrades
 
-                if len(non_discounted_upgrades) > 0:
-                    return non_discounted_upgrades[0]
+                group = discounted_upgrades or non_discounted_upgrades
+                if group:
+                    selected = self._choose_jev_upgrade(group, group[0], menu_left, menu_right, "home_base", discounted=bool(discounted_upgrades))
+                    return selected[:2]
                 return None, None
             
             x, y = self._scroll_locate_upgrade(
@@ -538,6 +656,8 @@ class Upgrader:
     def home_lab_random_upgrade(self):
         import time, numpy as np
         
+        self._pending_jev_upgrade = None
+
         try:
             # Open lab upgrade list menu
             self._click_home_lab()
@@ -579,9 +699,10 @@ class Upgrader:
                         potential_y_locs = np.delete(potential_y_locs, min_idx)
 
                 # Choose an upgrade
-                if len(discounted_upgrades) > 0:
-                    return menu_center, np.random.choice(discounted_upgrades)
-                return menu_center, np.random.choice(potential_y_locs)
+                group = discounted_upgrades if len(discounted_upgrades) else potential_y_locs
+                if len(group) == 0: return None, None
+                legacy = (menu_center, np.random.choice(group))
+                return self._choose_jev_upgrade([(menu_center, y) for y in group], legacy, menu_left, menu_right, "home_lab", discounted=bool(len(discounted_upgrades)))
             
             x_upgrade, y_upgrade = self._scroll_locate_upgrade(
                 locate_upgrade,
@@ -614,12 +735,16 @@ class Upgrader:
     def home_lab_specified_upgrade(self, upgrade_text):
         import time, numpy as np
         
+        self._pending_jev_upgrade = None
+
         try:
             # Render templates
             if type(upgrade_text) == str: upgrade_text = [upgrade_text]
             if len(upgrade_text) == 0: return None
             templates = [render_text(text, "CCBackBeat", 27) for text in upgrade_text]
-            np.random.shuffle(templates)
+            combined = list(zip(templates, upgrade_text))
+            np.random.shuffle(combined)
+            templates, upgrade_text = zip(*combined)
             
             # Open lab upgrade list menu
             self._click_home_lab()
@@ -644,29 +769,32 @@ class Upgrader:
                 x_sug, y_sug = Frame_Handler.locate(sug_template, frame, thresh=0.70, grayscale=False)
                 xys = Frame_Handler.batch_locate(templates, frame, thresh=0.80, ref="lc", grayscale=True)
                 non_discounted_upgrades = []
-                for x, y in xys:
+                discounted_upgrades = []
+                for (x, y), name in zip(xys, upgrade_text):
                     if x is not None and y is not None and (y_sug is None or (y_sug is not None and y > y_sug)):
                         section = Frame_Handler.crop(frame, menu_left, y-0.02, menu_right, y+0.02)
                         sufficient_resources = not check_color((255, 136, 127), section, tol=10)
                         if sufficient_resources:
                             # Check that located upgrade name is left aligned
                             if abs(x - menu_left) < 0.01:
-                                non_discounted_upgrades.append((x, y))
+                                non_discounted_upgrades.append((x, y, name))
                                 continue
 
                             # Or if it is aligned to green discount tag
                             tag_x, tag_y = Frame_Handler.locate(self.assets["green_tag"], section, thresh=0.80, grayscale=False, ref="rc", normalize=False)
                             if tag_x is not None and tag_y is not None and abs(x - (menu_left + tag_x/WINDOW_DIMS[1])) < 0.02:
-                                return x, y # Prioritize discounted upgrades
+                                discounted_upgrades.append((x, y, name)) # Prioritize discounted upgrades
 
                             # Or if it is left aligned to "New" label
                             new_x, new_y = Frame_Handler.locate(render_text("New", "CCBackBeat", 27, color=(13, 255, 13)), filter_color((13, 255, 13), section), thresh=0.70, grayscale=False, ref="rc", normalize=False)
                             if new_x is not None and new_y is not None and abs(x - (menu_left + new_x/WINDOW_DIMS[1])) < 0.02:
-                                non_discounted_upgrades.append((x, y))
+                                non_discounted_upgrades.append((x, y, name))
                                 continue
                 
-                if len(non_discounted_upgrades) > 0:
-                    return non_discounted_upgrades[0]
+                group = discounted_upgrades or non_discounted_upgrades
+                if group:
+                    selected = self._choose_jev_upgrade(group, group[0], menu_left, menu_right, "home_lab", discounted=bool(discounted_upgrades))
+                    return selected[:2]
                 return None, None
             
             x, y = self._scroll_locate_upgrade(
@@ -748,6 +876,8 @@ class Upgrader:
     def builder_random_upgrade(self):
         import time, re, numpy as np
         
+        self._pending_jev_upgrade = None
+
         try:
             # Open upgrade list menu
             self._click_builder_builders()
@@ -799,9 +929,10 @@ class Upgrader:
                         potential_y_locs = np.delete(potential_y_locs, min_idx)
 
                 # Choose an upgrade
-                if len(discounted_upgrades) > 0:
-                    return menu_center, np.random.choice(discounted_upgrades)
-                return menu_center, np.random.choice(potential_y_locs)
+                group = discounted_upgrades if len(discounted_upgrades) else potential_y_locs
+                if len(group) == 0: return None, None
+                legacy = (menu_center, np.random.choice(group))
+                return self._choose_jev_upgrade([(menu_center, y) for y in group], legacy, menu_left, menu_right, "builder_base", discounted=bool(len(discounted_upgrades)))
             
             x_upgrade, y_upgrade = self._scroll_locate_upgrade(
                 locate_upgrade,
@@ -839,6 +970,8 @@ class Upgrader:
     def builder_specified_upgrade(self, upgrade_text):
         import time, numpy as np
         
+        self._pending_jev_upgrade = None
+
         try:
             # Render templates
             if type(upgrade_text) == str: upgrade_text = [upgrade_text]
@@ -871,6 +1004,7 @@ class Upgrader:
                 x_sug, y_sug = Frame_Handler.locate(sug_template, frame, thresh=0.70, grayscale=False)
                 xys = Frame_Handler.batch_locate(templates, frame, thresh=0.80, ref="lc", grayscale=True)
                 non_discounted_upgrades = []
+                discounted_upgrades = []
                 for (x, y), name in zip(xys, upgrade_text):
                     if x is not None and y is not None and (y_sug is None or (y_sug is not None and y > y_sug)):
                         section = Frame_Handler.crop(frame, menu_left, y-0.02, menu_right, y+0.02)
@@ -884,10 +1018,11 @@ class Upgrader:
                             # Or if it is aligned to green discount tag
                             tag_x, tag_y = Frame_Handler.locate(self.assets["green_tag"], section, thresh=0.80, grayscale=False, ref="rc", normalize=False)
                             if tag_x is not None and tag_y is not None and abs(x - (menu_left + tag_x/WINDOW_DIMS[1])) < 0.02:
-                                return x, y, name # Prioritize discounted upgrades
+                                discounted_upgrades.append((x, y, name)) # Prioritize discounted upgrades
 
-                if len(non_discounted_upgrades) > 0:
-                    return non_discounted_upgrades[0]
+                group = discounted_upgrades or non_discounted_upgrades
+                if group:
+                    return self._choose_jev_upgrade(group, group[0], menu_left, menu_right, "builder_base", discounted=bool(discounted_upgrades))
                 return None, None, None
             
             x, y, upgrade_name = self._scroll_locate_upgrade(
@@ -929,6 +1064,8 @@ class Upgrader:
     def builder_lab_random_upgrade(self):
         import time, re, numpy as np
         
+        self._pending_jev_upgrade = None
+
         try:
             # Open lab upgrade list menu
             self._click_builder_lab()
@@ -970,9 +1107,10 @@ class Upgrader:
                         potential_y_locs = np.delete(potential_y_locs, min_idx)
 
                 # Choose an upgrade
-                if len(discounted_upgrades) > 0:
-                    return menu_center, np.random.choice(discounted_upgrades)
-                return menu_center, np.random.choice(potential_y_locs)
+                group = discounted_upgrades if len(discounted_upgrades) else potential_y_locs
+                if len(group) == 0: return None, None
+                legacy = (menu_center, np.random.choice(group))
+                return self._choose_jev_upgrade([(menu_center, y) for y in group], legacy, menu_left, menu_right, "builder_lab", discounted=bool(len(discounted_upgrades)))
             
             x_upgrade, y_upgrade = self._scroll_locate_upgrade(
                 locate_upgrade,
@@ -1004,6 +1142,8 @@ class Upgrader:
     def builder_lab_specified_upgrade(self, upgrade_text):
         import time, numpy as np
         
+        self._pending_jev_upgrade = None
+
         try:
             # Render templates
             if type(upgrade_text) == str: upgrade_text = [upgrade_text]
@@ -1036,6 +1176,7 @@ class Upgrader:
                 x_sug, y_sug = Frame_Handler.locate(sug_template, frame, thresh=0.70, grayscale=False)
                 xys = Frame_Handler.batch_locate(templates, frame, thresh=0.80, ref="lc", grayscale=True)
                 non_discounted_upgrades = []
+                discounted_upgrades = []
                 for (x, y), name in zip(xys, upgrade_text):
                     if x is not None and y is not None and (y_sug is None or (y_sug is not None and y > y_sug)):
                         section = Frame_Handler.crop(frame, menu_left, y-0.02, menu_right, y+0.02)
@@ -1049,7 +1190,7 @@ class Upgrader:
                             # Or if it is aligned to green discount tag
                             tag_x, tag_y = Frame_Handler.locate(self.assets["green_tag"], section, thresh=0.80, grayscale=False, ref="rc", normalize=False)
                             if tag_x is not None and tag_y is not None and abs(x - (menu_left + tag_x/WINDOW_DIMS[1])) < 0.02:
-                                return x, y, name # Prioritize discounted upgrades
+                                discounted_upgrades.append((x, y, name)) # Prioritize discounted upgrades
 
                             # Or if it is left aligned to "New" label
                             new_x, new_y = Frame_Handler.locate(render_text("New", "CCBackBeat", 27, color=(13, 255, 13)), filter_color((13, 255, 13), section), thresh=0.70, grayscale=False, ref="rc", normalize=False)
@@ -1057,8 +1198,9 @@ class Upgrader:
                                 non_discounted_upgrades.append((x, y, name))
                                 continue
 
-                if len(non_discounted_upgrades) > 0:
-                    return non_discounted_upgrades[0]
+                group = discounted_upgrades or non_discounted_upgrades
+                if group:
+                    return self._choose_jev_upgrade(group, group[0], menu_left, menu_right, "builder_lab", discounted=bool(discounted_upgrades))
                 return None, None, None
             
             x, y, upgrade_name = self._scroll_locate_upgrade(
@@ -1109,9 +1251,14 @@ class Upgrader:
                 try:
                     initial_builders = get_home_builders(1)
                     if initial_builders <= max(0, OPEN_HOME_BUILDERS): break
+                    self._jev_availability = {'builders': initial_builders, 'lab_available': None}
+                    upgrade_started = time.monotonic()
                     upgraded = self.home_upgrade()
                     time.sleep(0.5)
                     final_builders = get_home_builders(1)
+                    self.decisions.record('upgrade_outcome', village='home_base', name=upgraded,
+                        success=(final_builders < initial_builders) if upgraded != 'wall' else None,
+                        duration_seconds=time.monotonic()-upgrade_started)
                     if upgraded is not None:
                         upgraded = upgraded.lower()
                         if final_builders < initial_builders: upgrades_started.append(upgraded)
@@ -1126,9 +1273,13 @@ class Upgrader:
         lab_upgrades_started = []
         try:
             if not exclude_lab and self.home_lab_available(1):
+                self._jev_availability = {'builders': None, 'lab_available': True}
+                upgrade_started = time.monotonic()
                 upgraded = self.home_lab_upgrade()
                 time.sleep(0.5)
                 final_lab_avail = self.home_lab_available(1)
+                self.decisions.record('upgrade_outcome', village='home_lab', name=upgraded,
+                    success=upgraded is not None and not final_lab_avail, duration_seconds=time.monotonic()-upgrade_started)
                 if upgraded is not None and not final_lab_avail: lab_upgrades_started.append(upgraded.lower())
         except (KeyboardInterrupt, SystemExit): raise
         except: pass
@@ -1153,9 +1304,14 @@ class Upgrader:
                 try:
                     initial_builders = get_builder_builders(1)
                     if initial_builders <= max(0, OPEN_BUILDER_BUILDERS): break
+                    self._jev_availability = {'builders': initial_builders, 'lab_available': None}
+                    upgrade_started = time.monotonic()
                     upgraded = self.builder_upgrade()
                     time.sleep(0.5)
                     final_builders = get_builder_builders(1)
+                    self.decisions.record('upgrade_outcome', village='builder_base', name=upgraded,
+                        success=(final_builders < initial_builders) if upgraded != 'wall' else None,
+                        duration_seconds=time.monotonic()-upgrade_started)
                     if upgraded is not None:
                         upgraded = upgraded.lower()
                         if final_builders < initial_builders: upgrades_started.append(upgraded)
@@ -1168,9 +1324,13 @@ class Upgrader:
         lab_upgrades_started = []
         try:
             if not exclude_lab and self.builder_lab_available(1):
+                self._jev_availability = {'builders': None, 'lab_available': True}
+                upgrade_started = time.monotonic()
                 upgraded = self.builder_lab_upgrade()
                 time.sleep(0.5)
                 final_lab_avail = self.builder_lab_available(1)
+                self.decisions.record('upgrade_outcome', village='builder_lab', name=upgraded,
+                    success=upgraded is not None and not final_lab_avail, duration_seconds=time.monotonic()-upgrade_started)
                 if upgraded is not None and not final_lab_avail: lab_upgrades_started.append(upgraded.lower())
         except (KeyboardInterrupt, SystemExit): raise
         except: pass

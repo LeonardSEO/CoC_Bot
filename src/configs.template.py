@@ -12,6 +12,38 @@ TELEGRAM_BOT_TOKEN = "" # (e.g. 123456789:ABCdefGHIjkl-MNO_pqrSTUvwxYZ)
 # OPTIONAL: Groq API key for faster/more accurate OCR (enter empty string to disable)
 GROQ_API_KEY = ""
 
+# Local OCR: auto uses native Apple Vision on macOS, EasyOCR elsewhere.
+# Apple Vision failures fall back to EasyOCR. Groq, if configured, runs first.
+LOCAL_OCR_BACKEND = "auto" # "auto", "apple_vision", or "easyocr"
+
+# OPTIONAL: Typed Jev decisions via OpenRouter. Keep OPENROUTER_API_KEY in the
+# process environment; never store it here or in a packaged desktop app.
+JEV_MODE = "off" # "off", "shadow" (advice only), or "active"
+JEV_MODEL = "typesafe/jev-1.13"
+JEV_OBJECTIVE = "farm_and_upgrade" # or "trophies"
+JEV_UPGRADES = True
+JEV_BASE_SELECTION = False
+JEV_DEPLOYMENT = False
+# Attack features require a profile calibrated against real screenshots.
+JEV_SCREEN_PROFILE_PATH = "" # absolute JSON path; see docs/jev.md
+JEV_MIN_CONFIDENCE = 0.70 # distribution confidence, distinct from option probability
+JEV_MIN_PROBABILITY = 0.80
+JEV_MIN_QUALITY = 0.80
+JEV_MAX_AGE_SECONDS = 5
+JEV_CONNECT_TIMEOUT = 1
+JEV_READ_TIMEOUT = 2
+JEV_TOTAL_TIMEOUT = 3 # wall-clock API deadline, including response body
+# Limits apply to this bot process (shared by its attacker and upgrader).
+JEV_MAX_CALLS = 1000
+JEV_MAX_COST_USD = 1.00
+# Retained when a request's actual charge is unknown; not a server billing cap.
+JEV_RESERVE_COST_USD = 0.01
+JEV_MAX_REQUEST_BYTES = 32000
+JEV_MAX_RESPONSE_BYTES = 128000
+JEV_COOLDOWN_SECONDS = 60
+JEV_MAX_SKIPS = 10
+JEV_MAX_SEARCH_SECONDS = 25
+
 # REQUIRED: Instance Settings
 INSTANCE_IDS = ["main"]
 DEFAULT_INSTANCE_ID = INSTANCE_IDS[0]

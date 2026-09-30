@@ -20,6 +20,7 @@ def launch_proc(args):
     bot.run()
 
 def cmd_launch(args):
+    import utils
     if DISABLE_DEVICE_SLEEP: utils.disable_sleep()
     launch_proc(args)
 

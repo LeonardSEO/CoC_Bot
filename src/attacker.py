@@ -7,9 +7,42 @@ except:
     from configs_build import *
 
 class Attacker:
-    def __init__(self):
+    def __init__(self, decisions=None, observer=None):
         self.assets = Asset_Manager.attacker_assets
         self.misc_assets = Asset_Manager.misc_assets
+        if decisions is None:
+            from jev.runtime import create_service
+            decisions = create_service(configs)
+        self.decisions = decisions
+        if observer is None:
+            from jev.observations import ScreenObserver
+            observer = ScreenObserver.from_config(configs, OCR_Handler.get_text)
+        self.observer = observer
+        self._deployment_plan = None
+        self._attack_village = 'home'
+
+    def _select_home_base(self):
+        from jev.attacks import select_base
+        select_base(self.decisions, self.observer,
+            lambda: Frame_Handler.get_frame(grayscale=False), Input_Handler.click)
+
+    def _choose_deployment_plan(self, card_centers, available_slots, card_types, card_counts):
+        from jev.attacks import LEGACY_PLAN, choose_deployment
+        settings = self.decisions.settings
+        if self._deployment_plan is not None:
+            return self._deployment_plan
+        if settings.mode == 'off' or not settings.deployment:
+            return LEGACY_PLAN
+        observed = self.observer.deployment(Frame_Handler.get_frame(grayscale=False), self._attack_village)
+        if observed is None:
+            self.decisions.record('fallback', kind='deployment', reason='legal_areas_unavailable')
+            self._deployment_plan = LEGACY_PLAN
+        else:
+            observation, plans = observed
+            cards = [{'slot_in_current_view': i, 'type': kind or 'unknown', 'count': count if count >= 0 else None, 'enabled': bool(enabled)}
+                for i, (kind, count, enabled) in enumerate(zip(card_types, card_counts, available_slots))]
+            self._deployment_plan = choose_deployment(self.decisions, observation, plans, cards)
+        return self._deployment_plan
 
     # ============================================================
     # 📱 Screen Interaction
@@ -224,40 +257,59 @@ class Attacker:
         if available_slots is None: available_slots = [1] * len(card_centers)
         if card_types is None: card_types = [None] * len(card_centers)
         if card_counts is None: card_counts = [0] * len(card_centers)
-        
-        # Start holding deploy position w/ additional touch pointer
-        Input_Handler.down(0.5, 0.8, pointer=1)
-        
-        for i in range(len(card_centers)):
-            if available_slots[i]:
-                # Select slot
+        if not any(available_slots): return
+        plan = self._choose_deployment_plan(card_centers, available_slots, card_types, card_counts)
+        if plan.name != 'legacy' and not self.observer.points_valid(Frame_Handler.get_frame(grayscale=False), self._attack_village, plan.points):
+            from jev.attacks import LEGACY_PLAN
+            self.decisions.record('fallback', kind='deployment', reason='legal_area_changed')
+            plan = self._deployment_plan = LEGACY_PLAN
+
+        held = False
+        try:
+            deployed = 0
+            for i in range(len(card_centers)):
+                if not available_slots[i]: continue
                 Input_Handler.click(card_centers[i], 0.9)
-                
-                # Deploy selected slot
-                if card_types[i] in ["hero", "clan"]:
-                    Input_Handler.click(0.5, 0.8)
-                elif card_types[i] == "troop":
-                    Input_Handler.down(0.5, 0.8, pointer=0)
-                    end_time = time.monotonic() + TROOP_DEPLOY_TIME
-                    while time.monotonic() < end_time and not card_gray(card_centers[i]): time.sleep(0.01)
-                    Input_Handler.up(pointer=0)
-                elif card_types[i] == "spell":
-                    n = card_counts[i]
-                    rxs = np.random.uniform(0.35, 0.65, n)
-                    rys = np.random.uniform(0.45, 0.55, n)
-                    for coord in zip(rxs, rys):
-                        Input_Handler.click(*coord)
+                # Hold only after selecting an enabled card; excluded slots must
+                # never deploy through an already selected card.
+                if plan.name == 'legacy' and not held:
+                    Input_Handler.down(0.5, 0.8, pointer=1)
+                    held = True
+                point = plan.points[deployed % len(plan.points)]
+                if plan.name != 'legacy' and card_types[i] != 'spell':
+                    if not self.observer.points_valid(Frame_Handler.get_frame(grayscale=False), self._attack_village, (point,)):
+                        point = (.5, .8)
+                        self.decisions.record('fallback', kind='deployment', reason='point_changed_after_card_selection')
+                if card_types[i] in ['hero', 'clan']:
+                    Input_Handler.click(*point)
+                elif card_types[i] == 'troop':
+                    Input_Handler.down(*point, pointer=0)
+                    try:
+                        end_time = time.monotonic() + TROOP_DEPLOY_TIME
+                        while time.monotonic() < end_time and not card_gray(card_centers[i]): time.sleep(.01)
+                    finally:
+                        Input_Handler.up(pointer=0)
+                elif card_types[i] == 'spell':
+                    n = max(0, card_counts[i])
+                    rxs = np.random.uniform(.35, .65, n)
+                    rys = np.random.uniform(.45, .55, n)
+                    for coord in zip(rxs, rys): Input_Handler.click(*coord)
                 else:
-                    Input_Handler.click(0.5, 0.8, n=max(0, card_counts[i]))
-        
-        # Release additional pointer
-        Input_Handler.up(pointer=1)
+                    Input_Handler.click(*point, n=max(0, card_counts[i]))
+                self.decisions.record('deployment_action', village=self._attack_village, plan=plan.name,
+                    card_type=card_types[i], point=list(point), spell_targeting_unchanged=card_types[i] == 'spell')
+                deployed += 1
+        finally:
+            if held: Input_Handler.up(pointer=1)
         
         # Unselect last card
         Input_Handler.click(0.01, 0.9)
     
     def complete_normal_attack(self, restart=True, exclude_clan_troops=False):
         import time, numpy as np
+
+        self._deployment_plan = None
+        self._attack_village = 'home'
 
         Input_Handler.zoom(dir="out")
         Input_Handler.swipe_up()
@@ -307,12 +359,16 @@ class Attacker:
     
     def complete_builder_attack(self, restart=True):
         import numpy as np
+
+        self._deployment_plan = None
+        self._attack_village = 'builder'
         
         Input_Handler.zoom(dir="out")
         Input_Handler.swipe_up()
         
         card_centers = np.linspace(0.1, 0.9, 11)
-        self.deploy_troops(card_centers, card_counts=[4]*len(card_centers))
+        available_slots = [int(ATTACK_SLOT_RANGE[0] <= i <= ATTACK_SLOT_RANGE[1]) for i in range(len(card_centers))]
+        self.deploy_troops(card_centers, available_slots=available_slots, card_counts=[4]*len(card_centers))
         
         # Close and reopen CoC to auto complete battle
         if restart:
@@ -341,6 +397,7 @@ class Attacker:
             
             # Complete an attack
             if self.start_normal_attack(timeout):
+                self._select_home_base()
                 self.complete_normal_attack(restart=restart, exclude_clan_troops=EXCLUDE_CLAN_TROOPS)
         
         except Exception:

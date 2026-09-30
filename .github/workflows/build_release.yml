@@ -38,6 +38,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -U -r src/requirements.txt
 
+      - name: Test before packaging
+        run: python -m unittest discover -s tests -v
+
       - name: Build Project
         run: |
           python .github/workflows/build_release.py --version ${{ github.ref_name }} --${{ matrix.type }}

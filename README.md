@@ -18,6 +18,7 @@
 * Multiple accounts 👥
 
 ## Quality of Life Features
+* Optional typed upgrade and attack decisions through [Jev on OpenRouter](docs/jev.md)
 * View bot status on desktop or web app 🚦
 * Resume / pause bot execution from desktop or web app ⏯️
 * iPhone shortcut to auto resume / pause bot when CoC is opened by user ⏯️
