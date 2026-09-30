@@ -11,9 +11,17 @@ def main():
     parser.add_argument('--output', default='debug/android-diagnostics')
     args = parser.parse_args()
     import adbutils
-    adbutils.adb.connect(args.address)
-    device = adbutils.device(args.address)
-    image = device.screenshot(error_ok=False)
+    try:
+        adbutils.adb.connect(args.address, timeout=5)
+        connected = {device.serial for device in adbutils.adb.device_list()}
+        if args.address not in connected:
+            print(f'No connected Android device at {args.address}. Open BlueStacks, enable ADB, then run adb connect {args.address} and adb devices. No diagnostic files were saved.')
+            return 2
+        device = adbutils.device(args.address)
+        image = device.screenshot(error_ok=False)
+    except Exception as exc:
+        print(f'Cannot capture Android screenshot ({type(exc).__name__}). Check BlueStacks and adb devices, then retry. No diagnostic files were saved.')
+        return 2
     info = {'address': args.address, 'screenshot_size': list(image.size),
             'rotation': device.rotation(),
             'display_size': device.shell('wm size').strip(),

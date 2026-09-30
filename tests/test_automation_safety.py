@@ -183,6 +183,7 @@ class DiagnosticTests(unittest.TestCase):
         device.rotation.return_value = 1
         device.shell.return_value = 'Physical size: 1280x720'
         adb = SimpleNamespace(adb=Mock(),device=Mock(return_value=device))
+        adb.adb.device_list.return_value = [SimpleNamespace(serial='127.0.0.1:5555')]
         with tempfile.TemporaryDirectory() as directory, patch.dict(sys.modules,{'adbutils':adb}), patch.object(sys,'argv',['diagnose_android.py','--output',directory]), patch('builtins.print'):
             self.assertEqual(module.main(),1)
             self.assertTrue((Path(directory)/'screen.png').exists())
@@ -190,6 +191,20 @@ class DiagnosticTests(unittest.TestCase):
         device.shell.assert_called_once_with('wm size')
         device.screenshot.assert_called_once_with(error_ok=False)
         self.assertEqual(len(device.mock_calls),3)
+
+    def test_disconnected_emulator_does_not_attempt_capture(self):
+        import importlib.util
+        import tempfile
+        spec = importlib.util.spec_from_file_location('android_diagnostics_disconnected', ROOT/'scripts/diagnose_android.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        adb = SimpleNamespace(adb=Mock(),device=Mock())
+        adb.adb.device_list.return_value = []
+        with tempfile.TemporaryDirectory() as directory, patch.dict(sys.modules,{'adbutils':adb}), patch.object(sys,'argv',['diagnose_android.py','--output',str(Path(directory)/'missing')]), patch('builtins.print') as message:
+            self.assertEqual(module.main(),2)
+            self.assertFalse((Path(directory)/'missing').exists())
+            self.assertIn('No connected Android device',message.call_args.args[0])
+        adb.device.assert_not_called()
 
 
 if __name__ == '__main__': unittest.main()
