@@ -1483,11 +1483,6 @@ class Input_Handler:
                                               grayscale=False, thresh=.9)
                 upgrade_dialog = cx is not None and cy is not None
             if village or upgrade_dialog:
-                if village and x is not None and y is not None:
-                    x = 1+x if x < 0 else x
-                    y = 1+y if y < 0 else y
-                    if (x >= .85 and y >= .80) or (x >= .80 and y <= .25):
-                        raise AutomationStopped('Purchase guard: shop/resource-entry region is excluded')
                 # A modal may leave the village HUD visible. Inspect its centre
                 # too, excluding the normal Shop label in the village footer.
                 from purchase_safety import purchase_reason
@@ -1569,7 +1564,27 @@ class Input_Handler:
 
     @classmethod
     def click_exit(cls, n=1, delay=0):
-        cls.click(0.99, 0.99, n, delay=delay)
+        # Never tap the village corner to dismiss menus: it can open the shop.
+        # Android Back dismisses an overlay without activating its controls.
+        import re, time
+        for _ in range(n):
+            if ADB_Manager.adbutils_device.app_current().package != 'com.supercell.clashofclans':
+                raise AutomationStopped('Menu cleanup: Clash is not in front; refusing input')
+            frame = Frame_Handler.get_frame(grayscale=False)
+            village = (get_home_builders(0, return_amount=False, use_cached_frame=True)
+                       or get_builder_builders(0, return_amount=False, use_cached_frame=True))
+            try:
+                texts = OCR_Handler.local_ocr(frame)
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except Exception:
+                raise AutomationStopped('Menu cleanup observation failed; refusing input') from None
+            text = ' '.join(texts).casefold()
+            overlay = any(label in text for label in ('suggested upgrades', 'other upgrades', 'upgrades in progress'))
+            if village and not overlay:
+                return
+            ADB_Manager.adbutils_device.keyevent(4)
+            time.sleep(max(.2, delay))
 
     @classmethod
     def multi_click(cls, x1, y1, x2, y2, duration=0):

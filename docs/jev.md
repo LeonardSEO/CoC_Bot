@@ -284,7 +284,8 @@ BlueStacks and gameplay test.
 ## Purchase exclusions and local UI inventory
 
 Every touch gesture now checks the foreground package and a fresh screenshot.
-The village shop/footer and resource-plus regions are excluded from taps. Local
+Menu cleanup avoids blind village-corner taps and uses Android Back only while
+an overlay is observed. Ordinary village coordinates are not payment evidence. Local
 OCR blocks recognized shop/payment/resource-top-up prompts, including modals
 that leave the village HUD visible. OCR or foreground-observation failures stop
 inputs. These checks cannot guarantee recognition of every future/localized
@@ -362,3 +363,11 @@ money prices, explicit purchase/payment actions, resource top-ups and non-Clash
 payment overlays still stop inputs. Unknown screens retain strict currency and
 shop-label rules. Stops now include the decision category, without private OCR
 text, so false positives can be investigated from logs.
+
+
+The old `click_exit` cleanup tapped (0.99,0.99), which both fell inside the coarse
+shop-region deny rule and could activate village controls. It now observes the
+foreground, village HUD and menu labels, dismisses overlays with Android Back,
+and stops at a plain village. All payment/text/foreground guards remain active;
+cleanup never activates a shop or payment control. Coordinate-only deny zones
+were removed because valid game/cleanup actions can occupy those regions.
