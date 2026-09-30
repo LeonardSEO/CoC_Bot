@@ -31,7 +31,8 @@ class PurchaseTests(unittest.TestCase):
         device.app_current.return_value = SimpleNamespace(package=package)
         namespace = {'ADB_Manager':SimpleNamespace(adbutils_device=device),'Frame_Handler':Mock(),
                      'get_home_builders':Mock(return_value=village),'get_builder_builders':Mock(return_value=False),
-                     'OCR_Handler':Mock()}
+                     'OCR_Handler':Mock(), 'Asset_Manager':SimpleNamespace(upgrader_assets={'confirm':'confirm'})}
+        namespace['Frame_Handler'].locate.return_value = (None,None)
         namespace['OCR_Handler'].local_ocr.return_value = list(texts)
         return load({'Input_Handler'},namespace)['Input_Handler'], namespace
 
@@ -46,6 +47,13 @@ class PurchaseTests(unittest.TestCase):
         with self.assertRaises(AutomationStopped): handler._guard_purchase(.5,.8)
         ns['OCR_Handler'].local_ocr.assert_called_once()
         ns['OCR_Handler'].external_ocr.assert_not_called()
+
+    def test_anchored_upgrade_dialog_does_not_scan_village_shop_footer(self):
+        handler,ns = self.handler(texts=('Upgrade Wall to Level 13?', 'Confirm'))
+        ns['Frame_Handler'].locate.return_value = (.5,.8)
+        handler._guard_purchase(.5,.8)
+        ns['Frame_Handler'].crop.assert_called_once()
+        ns['OCR_Handler'].local_ocr.assert_called_once_with(ns['Frame_Handler'].crop.return_value)
 
     def test_payment_overlay_in_another_package_is_blocked(self):
         handler,ns = self.handler(package='com.android.vending')

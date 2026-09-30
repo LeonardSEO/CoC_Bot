@@ -53,6 +53,8 @@ LOCAL_GUI = True # web app not required
 CHECK_INTERVAL = 5 # minutes
 
 # REQUIRED: Upgrade settings
+# Use the recognized Select Row action for walls; normal priorities still apply.
+WALL_GROUP_UPGRADES = True
 MAX_UPGRADES_PER_CHECK = 10 # applies to both home and builder base
 START_FROM_MENU_TOP = True
 
