@@ -11,7 +11,7 @@ ACTIVITY = PACKAGE + "/com.supercell.titan.GameApp"
 DEFAULT_CONFIG = Path("/Users/Shared/Library/Application Support/BlueStacks/bluestacks.conf")
 
 
-def bluestacks_address(instance="BlueStacks Air", config=DEFAULT_CONFIG):
+def resolve_bluestacks(instance="BlueStacks Air", config=DEFAULT_CONFIG):
     """Read only the chosen instance's name and ADB port."""
     names, ports = {}, {}
     for line in Path(config).read_text().splitlines():
@@ -25,14 +25,24 @@ def bluestacks_address(instance="BlueStacks Air", config=DEFAULT_CONFIG):
     port = int(ports.get(matches[0], "0"))
     if not 1 <= port <= 65535:
         raise ValueError("Invalid BlueStacks ADB port")
-    return f"127.0.0.1:{port}"
+    return f"127.0.0.1:{port}", matches[0]
 
 
-def open_bluestacks():
+def bluestacks_address(instance="BlueStacks Air", config=DEFAULT_CONFIG):
+    return resolve_bluestacks(instance, config)[0]
+
+
+def open_bluestacks(instance="BlueStacks Air"):
     if sys.platform != "darwin":
         raise RuntimeError("Open the Android emulator manually on this platform")
+    internal = resolve_bluestacks(instance, DEFAULT_CONFIG)[1] if DEFAULT_CONFIG.exists() else None
+    if internal is None and instance != "BlueStacks Air":
+        raise ValueError("Cannot select a BlueStacks instance without its configuration")
     for name in ("BlueStacks", "BlueStacks Air"):
-        result = subprocess.run(["open", "-a", name], capture_output=True, timeout=15)
+        command = ["open", "-a", name]
+        if internal:
+            command.extend(["--args", "--instance", internal])
+        result = subprocess.run(command, capture_output=True, timeout=15)
         if result.returncode == 0:
             return
     raise RuntimeError("BlueStacks could not be opened; check its installation")
@@ -54,7 +64,7 @@ def ensure_android(adb, address=None, instance="BlueStacks Air", start=True, tim
         if not start and not wait:
             raise ConnectionError(f"No connected Android device at {address}")
         if start and not opened:
-            open_bluestacks()
+            open_bluestacks(instance)
             opened = True
         if time.monotonic() >= deadline:
             raise ConnectionError(f"BlueStacks ADB is not ready at {address}; enable ADB in BlueStacks")
