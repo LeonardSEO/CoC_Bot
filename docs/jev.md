@@ -214,22 +214,32 @@ If the bot opens unrelated controls, stop its worker and use read-only Android
 diagnostics before resuming:
 
 ```sh
-python scripts/diagnose_android.py --address 127.0.0.1:5555
+python scripts/diagnose_android.py
 ```
 
-This saves `debug/android-diagnostics/device.json` and `screen.png` locally;
-by default it sends no taps, swipes, app launches or model requests. To launch
-installed Clash explicitly and wait up to 60 seconds for its landscape screen:
+The diagnostic now automatically discovers the BlueStacks Air ADB port, opens
+BlueStacks if disconnected on macOS, connects within a bounded deadline, opens
+installed Clash and waits for the recognized village. The Supercell splash
+screen in landscape is not sufficient. `--open-clash` remains accepted for
+compatibility. It never sends gameplay taps, purchases or model requests.
+
+For immediate read-only capture without launching apps:
 
 ```sh
-python scripts/diagnose_android.py --open-clash
+python scripts/diagnose_android.py --no-start --no-open-clash
 ```
 
-This option opens only the Clash activity, with no gameplay taps or purchases.
-The report includes the foreground package and `ready_for_automation`, which
-requires Clash in front, 1920×1080 capture and a recognized village HUD. If Clash
-is not installed, it reports that instead of opening a store. Review screenshots for
-personal information before sharing. Actual Android screenshot size must match
+Fresh reports include a timestamp, the foreground package and
+`ready_for_automation`. Previous reports/screenshots are archived before each
+attempt, so connection failures cannot show an old capture as the latest result.
+Startup/login dialogs still require manual interaction.
+
+The normal bot also reuses an already running BlueStacks instead of forcing a
+restart, waits for ADB, then waits for its village HUD. Exiting a worker no
+longer automatically closes BlueStacks. This lets the next run reuse the emulator.
+
+Review screenshots for personal information before sharing. Actual Android
+screenshot size must match
 the configured 1920×1080 resolution; the bot no longer silently stretches
 screenshots. Capture errors/black frames stop automation, and startup requires a
 recognized village HUD instead of treating a failed recognition as success.
