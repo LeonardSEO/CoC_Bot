@@ -2,7 +2,7 @@ import sys, collections
 from pathlib import Path
 from functools import lru_cache
 from log import logger
-from automation_safety import AutomationStopped, PortraitFrame, validate_frame, raw_touch
+from automation_safety import AutomationStopped, PortraitFrame, BlackFrame, validate_frame, raw_touch
 try:
     import configs
     from configs import *
@@ -541,6 +541,7 @@ def start_coc(timeout=60, detailed=False):
 
         ADB_Manager.adbutils_device.shell('am start -W -n com.supercell.clashofclans/com.supercell.titan.GameApp')
         recognized = False
+        loading_frame_seen = False
         start = time.time()
         while time.time() - start < timeout:
             if not running():
@@ -549,7 +550,10 @@ def start_coc(timeout=60, detailed=False):
 
             try:
                 Frame_Handler.get_frame()
-            except PortraitFrame:
+            except (PortraitFrame, BlackFrame):
+                if not loading_frame_seen:
+                    logger.info('Waiting for Clash loading frames to become a recognizable village...')
+                    loading_frame_seen = True
                 time.sleep(1)
                 continue
             
@@ -571,7 +575,7 @@ def start_coc(timeout=60, detailed=False):
             
             time.sleep(1)
         if not recognized:
-            raise AutomationStopped('Village HUD not recognized. Open the village manually and run scripts/diagnose_android.py; no gameplay inputs were sent.')
+            raise AutomationStopped('Village did not become recognizable before the startup deadline; no gameplay inputs were sent.')
         logger.info("CoC started")
         if not detailed: return True
         else: return True, "running"
@@ -1632,6 +1636,8 @@ class Frame_Handler:
         if use_cached and cls.cached_frame is not None:
             frame = cls.cached_frame.copy()
         else:
+            # An invalid fresh capture must also invalidate the previous cache.
+            cls.cached_frame = None
             try:
                 frame = ADB_Manager.adbutils_device.screenshot(error_ok=False)
             except (KeyboardInterrupt, SystemExit): raise
