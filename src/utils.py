@@ -2,7 +2,7 @@ import sys, collections
 from pathlib import Path
 from functools import lru_cache
 from log import logger
-from automation_safety import AutomationStopped, validate_frame, raw_touch
+from automation_safety import AutomationStopped, PortraitFrame, validate_frame, raw_touch
 try:
     import configs
     from configs import *
@@ -547,7 +547,11 @@ def start_coc(timeout=60, detailed=False):
                 if not detailed: return False
                 else: return False, "paused"
 
-            Frame_Handler.get_frame()
+            try:
+                Frame_Handler.get_frame()
+            except PortraitFrame:
+                time.sleep(1)
+                continue
             
             try:
                 if get_home_builders(0, return_amount=False, use_cached_frame=True):

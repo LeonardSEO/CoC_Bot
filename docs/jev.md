@@ -218,13 +218,26 @@ python scripts/diagnose_android.py --address 127.0.0.1:5555
 ```
 
 This saves `debug/android-diagnostics/device.json` and `screen.png` locally;
-it sends no taps, swipes, app launches or model requests. Review screenshots for
+by default it sends no taps, swipes, app launches or model requests. To launch
+installed Clash explicitly and wait up to 60 seconds for its landscape screen:
+
+```sh
+python scripts/diagnose_android.py --open-clash
+```
+
+This option opens only the Clash activity, with no gameplay taps or purchases.
+The report includes the foreground package and `ready_for_automation`, which
+requires Clash in front, 1920×1080 capture and a recognized village HUD. If Clash
+is not installed, it reports that instead of opening a store. Review screenshots for
 personal information before sharing. Actual Android screenshot size must match
 the configured 1920×1080 resolution; the bot no longer silently stretches
 screenshots. Capture errors/black frames stop automation, and startup requires a
 recognized village HUD instead of treating a failed recognition as success.
 Startup no longer blindly taps an exit corner or inferred Continue/Update
-buttons. Dismiss startup dialogs manually. Village navigation checks both its
+buttons. During startup only, a 1080×1920 loading frame is allowed to wait within
+the existing startup deadline; that portrait frame is never passed to HUD
+recognition or used for inputs. A persistent portrait screen stops the worker.
+Dismiss startup dialogs manually. Village navigation checks both its
 source and destination. Unreadable builder/lab counts stop the worker.
 
 Square virtual touch axes, as reported by BlueStacks Air, use Android's reported

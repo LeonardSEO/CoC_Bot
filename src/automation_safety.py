@@ -6,12 +6,18 @@ class AutomationStopped(SystemExit):
     """Stop this worker without retrying inputs or restarting the emulator."""
 
 
+class PortraitFrame(AutomationStopped):
+    """A loading screen may be portrait; gameplay must never use this frame."""
+
+
 def validate_frame(frame, expected):
     import numpy as np
     if frame.ndim != 3 or frame.shape[2] < 3:
         raise AutomationStopped('Invalid screenshot; automation stopped')
     height, width = frame.shape[:2]
     if (width, height) != tuple(expected):
+        if (width, height) == tuple(reversed(expected)):
+            raise PortraitFrame('Android is still in portrait; waiting for the landscape village')
         raise AutomationStopped(f'Screenshot is {width}x{height}; expected {expected[0]}x{expected[1]}. Set the Android display resolution before restarting.')
     if not np.any(frame):
         raise AutomationStopped('Black screenshot; automation stopped')

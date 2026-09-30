@@ -9,13 +9,13 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src'))
-from automation_safety import AutomationStopped, raw_touch, validate_frame
+from automation_safety import AutomationStopped, PortraitFrame, raw_touch, validate_frame
 
 
 def load(names, namespace):
     tree = ast.parse((ROOT / 'src/utils.py').read_text())
     nodes = [n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.ClassDef)) and n.name in names]
-    namespace.update(AutomationStopped=AutomationStopped, raw_touch=raw_touch, validate_frame=validate_frame)
+    namespace.update(AutomationStopped=AutomationStopped, PortraitFrame=PortraitFrame, raw_touch=raw_touch, validate_frame=validate_frame)
     exec(compile(ast.Module(body=nodes, type_ignores=[]), 'utils.py', 'exec'), namespace)
     return namespace
 
@@ -49,6 +49,22 @@ class StartupTests(unittest.TestCase):
             self.assertEqual(context['start_coc'](detailed=True), (True,'running'))
             self.assertEqual(context['TEMP_CACHE']['location'], expected)
             self.assertEqual(context['Input_Handler'].mock_calls, [])
+
+    def test_portrait_loading_waits_for_landscape_without_clicking(self):
+        context = self.context(home=True)
+        context['Frame_Handler'].get_frame.side_effect = [PortraitFrame('loading'),None]
+        with patch('time.time',side_effect=[0,0,1]), patch('time.sleep'):
+            self.assertEqual(context['start_coc'](timeout=3,detailed=True),(True,'running'))
+        context['get_home_builders'].assert_called_once()
+        self.assertEqual(context['Input_Handler'].mock_calls,[])
+
+    def test_persistent_portrait_stops_at_deadline_without_hud_or_inputs(self):
+        context = self.context(home=True)
+        context['Frame_Handler'].get_frame.side_effect = PortraitFrame('loading')
+        with patch('time.time',side_effect=[0,0,1,4]), patch('time.sleep'), self.assertRaises(AutomationStopped):
+            context['start_coc'](timeout=3,detailed=True)
+        context['get_home_builders'].assert_not_called()
+        self.assertEqual(context['Input_Handler'].mock_calls,[])
 
     def test_stale_cached_location_does_not_authorize_navigation(self):
         for function in ('to_home_base','to_builder_base'):
@@ -182,6 +198,7 @@ class DiagnosticTests(unittest.TestCase):
         device.screenshot.return_value = Image.new('RGB',(1280,720),'white')
         device.rotation.return_value = 1
         device.shell.return_value = 'Physical size: 1280x720'
+        device.app_current.return_value = SimpleNamespace(package='com.android.vending')
         adb = SimpleNamespace(adb=Mock(),device=Mock(return_value=device))
         adb.adb.device_list.return_value = [SimpleNamespace(serial='127.0.0.1:5555')]
         with tempfile.TemporaryDirectory() as directory, patch.dict(sys.modules,{'adbutils':adb}), patch.object(sys,'argv',['diagnose_android.py','--output',directory]), patch('builtins.print'):
@@ -190,7 +207,31 @@ class DiagnosticTests(unittest.TestCase):
             self.assertTrue((Path(directory)/'device.json').exists())
         device.shell.assert_called_once_with('wm size')
         device.screenshot.assert_called_once_with(error_ok=False)
-        self.assertEqual(len(device.mock_calls),3)
+        self.assertEqual(len(device.mock_calls),4)
+
+    def test_open_clash_waits_for_landscape_and_checks_foreground_and_hud(self):
+        import importlib.util
+        import tempfile
+        import json
+        import cv2
+        from PIL import Image
+        spec = importlib.util.spec_from_file_location('diagnostic_open_clash',ROOT/'scripts/diagnose_android.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        device = Mock()
+        device.screenshot.side_effect = [Image.new('RGB',(1080,1920),'white'),Image.new('RGB',(1920,1080),'white'),Image.new('RGB',(1920,1080),'white')]
+        device.shell.side_effect = ['package:/data/app/clash/base.apk','Status: ok','Physical size: 1080x1920']
+        device.app_current.return_value = SimpleNamespace(package='com.supercell.clashofclans')
+        device.rotation.return_value = 1
+        adb = SimpleNamespace(adb=Mock(),device=Mock(return_value=device))
+        adb.adb.device_list.return_value = [SimpleNamespace(serial='127.0.0.1:5555')]
+        with tempfile.TemporaryDirectory() as directory, patch.dict(sys.modules,{'adbutils':adb}), patch.object(sys,'argv',['diagnose_android.py','--open-clash','--output',directory]), patch('time.sleep') as sleep, patch('builtins.print'), patch.object(cv2,'minMaxLoc',return_value=(0,.95,(0,0),(0,0))):
+            self.assertEqual(module.main(),0)
+            info=json.loads((Path(directory)/'device.json').read_text())
+            self.assertTrue(info['ready_for_automation'])
+            sleep.assert_called_once_with(1)
+        self.assertEqual(device.shell.call_args_list[1].args[0],['am','start','-W','-n','com.supercell.clashofclans/com.supercell.titan.GameApp'])
+        self.assertEqual(len(device.shell.call_args_list),3)
 
     def test_disconnected_emulator_does_not_attempt_capture(self):
         import importlib.util
