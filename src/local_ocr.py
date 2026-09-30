@@ -23,7 +23,10 @@ def apple_vision_text(frame):
         request.setRecognitionLanguages_(['en-US'])
         # Resource amounts and game names must not be autocorrected into words.
         request.setUsesLanguageCorrection_(False)
-        handler = Vision.VNImageRequestHandler.alloc().initWithData_options_(image_data, {})
+        # A Python dict is bridged as a proxy. Native option-key lookups can
+        # raise "key does not exist" on newer macOS; use a real NSDictionary.
+        options = Foundation.NSDictionary.dictionary()
+        handler = Vision.VNImageRequestHandler.alloc().initWithData_options_(image_data, options)
         success, error = handler.performRequests_error_([request], None)
         if not success or error is not None:
             raise RuntimeError('Apple Vision recognition failed')

@@ -82,7 +82,7 @@ class BridgeTests(unittest.TestCase):
             VNRecognizeTextRequest=Mock(), VNImageRequestHandler=Mock())
         vision.VNRecognizeTextRequest.alloc.return_value.init.return_value = request
         vision.VNImageRequestHandler.alloc.return_value.initWithData_options_.return_value.performRequests_error_.return_value = (success, error)
-        foundation = SimpleNamespace(NSData=Mock())
+        foundation = SimpleNamespace(NSData=Mock(), NSDictionary=Mock())
         return {'Vision':vision,'Foundation':foundation,'objc':SimpleNamespace(autorelease_pool=nullcontext)}, request
 
     def test_lossless_png_bridge_and_literal_recognition(self):
@@ -106,6 +106,24 @@ class BridgeTests(unittest.TestCase):
             modules, _ = self.modules(success, error)
             with patch.dict(sys.modules, modules), self.assertRaises(RuntimeError):
                 apple_vision_text(np.zeros((10,10),dtype=np.uint8))
+
+    def test_handler_options_are_a_native_dictionary(self):
+        import numpy as np
+        modules, _ = self.modules()
+        native_options = object()
+        modules['Foundation'].NSDictionary.dictionary.return_value = native_options
+        initializer = modules['Vision'].VNImageRequestHandler.alloc.return_value.initWithData_options_
+        original_handler = initializer.return_value
+
+        def initialize(data, options):
+            if options is not native_options:
+                raise ValueError('NSInvalidArgumentException - key does not exist')
+            return original_handler
+
+        initializer.side_effect = initialize
+        with patch.dict(sys.modules, modules):
+            self.assertEqual(apple_vision_text(np.zeros((10,10),dtype=np.uint8)), ['12 345'])
+        modules['Foundation'].NSDictionary.dictionary.assert_called_once_with()
 
     @unittest.skipUnless(sys.platform == 'darwin', 'Requires native Apple Vision on macOS')
     def test_native_mac_recognizes_rendered_number(self):
