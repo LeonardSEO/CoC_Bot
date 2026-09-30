@@ -48,6 +48,11 @@ def gui_launch(args):
             if data == -1: raise SystemExit
             action, id = data.get("action"), data.get("id")
             if action == "start":
+                existing = procs.get(id)
+                if existing is not None and existing.is_alive():
+                    continue
+                if existing is not None:
+                    existing.join()
                 args_copy = deepcopy(args)
                 args_copy.id = data.get("id")
                 p = Process(target=launch_proc, args=(args_copy,))

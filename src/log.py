@@ -30,6 +30,7 @@ def enable_logging(id):
         retention=5,
         compression="zip",
         enqueue=True,
+        diagnose=False,
         format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}",
         filter=lambda record: is_included(record),
     )
@@ -37,6 +38,7 @@ def enable_logging(id):
     logger.add(
         sys.stdout,
         level="INFO",
+        diagnose=False,
         format="{time:YYYY-MM-DD HH:mm:ss} | <level>{level: <8}</level> | {message}",
         filter=lambda record: is_included(record) and record["level"].no < 30
     )
@@ -44,7 +46,7 @@ def enable_logging(id):
     logger.add(
         sys.stderr,
         level="ERROR",
+        diagnose=False,
         format="{time:YYYY-MM-DD HH:mm:ss} | <level>{level: <8}</level> | {message}",
         filter=lambda record: is_included(record) and record["level"].no >= 30
     )
-

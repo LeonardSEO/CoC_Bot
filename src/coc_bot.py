@@ -68,6 +68,10 @@ class CoC_Bot:
                 
                 time.sleep(60 * CHECK_INTERVAL)
             
+            except AutomationStopped as exc:
+                logger.error('Automation stopped: {}', str(exc))
+                update_status('error')
+                return
             except (KeyboardInterrupt, SystemExit): raise
             except Exception:
                 logger.exception("CoC_Bot.run:")

@@ -182,6 +182,8 @@ class Upgrader:
                 
                 # Extract text
                 text = fix_digits(''.join(OCR_Handler.get_text(section)).replace(' ', '').replace('/', ''))
+                if not text or not text[0].isdigit():
+                    raise AutomationStopped('Lab count unreadable; refusing upgrade inputs')
                 available = int(text[0])
                 return available > 0
             except (KeyboardInterrupt, SystemExit): raise
@@ -207,6 +209,8 @@ class Upgrader:
                 
                 # Extract text
                 text = fix_digits(''.join(OCR_Handler.get_text(section)).replace(' ', '').replace('/', ''))
+                if not text or not text[0].isdigit():
+                    raise AutomationStopped('Builder lab count unreadable; refusing upgrade inputs')
                 available = int(text[0])
                 return available > 0
             except (KeyboardInterrupt, SystemExit): raise

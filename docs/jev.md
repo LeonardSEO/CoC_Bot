@@ -210,6 +210,30 @@ No improvement in loot, stars or trophies is claimed until measured.
 
 ## Verification
 
+If the bot opens unrelated controls, stop its worker and use read-only Android
+diagnostics before resuming:
+
+```sh
+python scripts/diagnose_android.py --address 127.0.0.1:5555
+```
+
+This saves `debug/android-diagnostics/device.json` and `screen.png` locally;
+it sends no taps, swipes, app launches or model requests. Review screenshots for
+personal information before sharing. Actual Android screenshot size must match
+the configured 1920×1080 resolution; the bot no longer silently stretches
+screenshots. Capture errors/black frames stop automation, and startup requires a
+recognized village HUD instead of treating a failed recognition as success.
+Startup no longer blindly taps an exit corner or inferred Continue/Update
+buttons. Dismiss startup dialogs manually. Village navigation checks both its
+source and destination. Unreadable builder/lab counts stop the worker.
+
+Square virtual touch axes, as reported by BlueStacks Air, use Android's reported
+display rotation rather than an aspect-ratio guess. The transformation has unit
+tests but needs a real-device check; it is not proof of correct deployment on
+every emulator. Reconnection cleans up this worker's touch server and does not
+kill the shared ADB server. The launcher rejects duplicate starts of a running
+instance. Bot exception logs disable Loguru's local-variable diagnostics.
+
 ```sh
 .venv/bin/python -m unittest discover -s tests -v
 ```

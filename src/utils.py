@@ -2,6 +2,7 @@ import sys, collections
 from pathlib import Path
 from functools import lru_cache
 from log import logger
+from automation_safety import AutomationStopped, validate_frame, raw_touch
 try:
     import configs
     from configs import *
@@ -464,15 +465,11 @@ def extend_pythonanywhere_hosting(username, password):
 def to_home_base(ref_cache=False):
     import cv2, time, numpy as np
     
-    if ref_cache and TEMP_CACHE.get("location") == "home_base": return
-    
-    TEMP_CACHE["location"] = "home_base"
-    
-    try:
-        get_home_builders(0, return_amount=False)
+    if get_home_builders(0, return_amount=False):
+        TEMP_CACHE["location"] = "home_base"
         return
-    except (KeyboardInterrupt, SystemExit): raise
-    except: pass
+    if not get_builder_builders(0, return_amount=False):
+        raise AutomationStopped('Neither village recognized; refusing village navigation')
     
     Input_Handler.zoom(dir="out")
     for _ in range(3):
@@ -497,7 +494,11 @@ def to_home_base(ref_cache=False):
             if x is None or y is None: continue
             Input_Handler.click(x, y)
             time.sleep(2)
+            if not get_home_builders(5, return_amount=False):
+                raise AutomationStopped('Home village transition not confirmed')
+            TEMP_CACHE["location"] = "home_base"
             return
+    raise AutomationStopped('Home village boat not found; automation stopped')
 
 def get_home_builders(timeout=60, return_amount=True, raise_exception=True, use_cached_frame=False):
     import time, cv2
@@ -511,11 +512,12 @@ def get_home_builders(timeout=60, return_amount=True, raise_exception=True, use_
             slash = cv2.cvtColor(Asset_Manager.misc_assets["slash"], cv2.COLOR_RGB2GRAY)
             res = cv2.matchTemplate(section, slash, cv2.TM_CCOEFF_NORMED)
             _, max_val, _, _ = cv2.minMaxLoc(res)
-            if raise_exception and max_val < 0.9: raise Exception("Slash not found")
-            
             if not return_amount: return max_val >= 0.9
+            if max_val < 0.9: raise Exception("Slash not found")
             
             text = fix_digits(''.join(OCR_Handler.get_text(section)).replace(' ', '').replace('/', ''))
+            if not text or not text[0].isdigit():
+                raise AutomationStopped('Home builder count unreadable; automation stopped')
             available = int(text[0])
             return available
         except (KeyboardInterrupt, SystemExit): raise
@@ -523,7 +525,8 @@ def get_home_builders(timeout=60, return_amount=True, raise_exception=True, use_
             logger.error(f"get_home_builders: {e}")
         time.sleep(0.1)
         if time.time() > start + timeout: break
-    raise Exception("Failed to get home builders")
+    if not return_amount: return False
+    raise AutomationStopped("Failed to recognize home builders; automation stopped")
 
 def start_coc(timeout=60, detailed=False):
     import time
@@ -534,48 +537,37 @@ def start_coc(timeout=60, detailed=False):
         if not running():
             if not detailed: return False
             else: return False, "paused"
-        to_system_home()
         logger.info("Starting CoC...")
 
-        cont_templates = [render_text("Continue", "SupercellMagic", s, color=(255, 255, 255)) for s in range(25, 31)]
-
-        i = 0
+        ADB_Manager.adbutils_device.shell('am start -W -n com.supercell.clashofclans/com.supercell.titan.GameApp')
+        recognized = False
         start = time.time()
         while time.time() - start < timeout:
             if not running():
                 if not detailed: return False
                 else: return False, "paused"
 
-            ADB_Manager.adbutils_device.shell(f"am start {'-S' if i==0 else ''} -W -n com.supercell.clashofclans/com.supercell.titan.GameApp")
-            Input_Handler.click_exit(4, 0.1)
-            
             Frame_Handler.get_frame()
             
             try:
-                get_home_builders(0, return_amount=False, use_cached_frame=True)
-                TEMP_CACHE["location"] = "home_base"
-                break
+                if get_home_builders(0, return_amount=False, use_cached_frame=True):
+                    TEMP_CACHE["location"] = "home_base"
+                    recognized = True
+                    break
             except (KeyboardInterrupt, SystemExit): raise
             except: pass
             
             try:
-                get_builder_builders(0, return_amount=False, use_cached_frame=True)
-                TEMP_CACHE["location"] = "builder_base"
-                break
+                if get_builder_builders(0, return_amount=False, use_cached_frame=True):
+                    TEMP_CACHE["location"] = "builder_base"
+                    recognized = True
+                    break
             except (KeyboardInterrupt, SystemExit): raise
             except: pass
             
-            cont_locs = Frame_Handler.batch_locate(cont_templates, grayscale=True, thresh=0.7, ref="cc", use_cached=True)
-            for x, y in cont_locs:
-                if x is not None and y is not None:
-                    Input_Handler.click(x, y)
-            
-            update_coc(timeout=5, from_in_game=True)
-            
-            i += 1
-        if time.time() - start > timeout:
-            stop_coc()
-            raise Exception("Failed to start CoC")
+            time.sleep(1)
+        if not recognized:
+            raise AutomationStopped('Village HUD not recognized. Open the village manually and run scripts/diagnose_android.py; no gameplay inputs were sent.')
         logger.info("CoC started")
         if not detailed: return True
         else: return True, "running"
@@ -617,15 +609,11 @@ def update_coc(timeout=10, from_in_game=False):
 def to_builder_base(ref_cache=False):
     import cv2, time, numpy as np
     
-    if ref_cache and TEMP_CACHE.get("location") == "builder_base": return
-    
-    TEMP_CACHE["location"] = "builder_base"
-    
-    try:
-        get_builder_builders(0, return_amount=False)
+    if get_builder_builders(0, return_amount=False):
+        TEMP_CACHE["location"] = "builder_base"
         return
-    except (KeyboardInterrupt, SystemExit): raise
-    except: pass
+    if not get_home_builders(0, return_amount=False):
+        raise AutomationStopped('Neither village recognized; refusing village navigation')
     
     for _ in range(3):
         Input_Handler.zoom(dir="in")
@@ -646,8 +634,12 @@ def to_builder_base(ref_cache=False):
             if x is None or y is None: continue
             Input_Handler.click(x, y)
             time.sleep(2)
+            if not get_builder_builders(5, return_amount=False):
+                raise AutomationStopped('Builder village transition not confirmed')
+            TEMP_CACHE["location"] = "builder_base"
             return
         Input_Handler.swipe(x1=0.5, y1=0.5, x2=0.25, y2=0.75, hold_end_time=100)
+    raise AutomationStopped('Builder village boat not found; automation stopped')
 
 def get_builder_builders(timeout=60, return_amount=True, raise_exception=True, use_cached_frame=False):
     import time, cv2
@@ -661,11 +653,12 @@ def get_builder_builders(timeout=60, return_amount=True, raise_exception=True, u
             slash = cv2.cvtColor(Asset_Manager.misc_assets["slash"], cv2.COLOR_RGB2GRAY)
             res = cv2.matchTemplate(section, slash, cv2.TM_CCOEFF_NORMED)
             _, max_val, _, _ = cv2.minMaxLoc(res)
-            if raise_exception and max_val < 0.9: raise Exception("Slash not found")
-            
             if not return_amount: return max_val >= 0.9
+            if max_val < 0.9: raise Exception("Slash not found")
             
             text = fix_digits(''.join(OCR_Handler.get_text(section)).replace(' ', '').replace('/', ''))
+            if not text or not text[0].isdigit():
+                raise AutomationStopped('Builder village count unreadable; automation stopped')
             available = int(text[0])
             return available
         except (KeyboardInterrupt, SystemExit): raise
@@ -673,7 +666,8 @@ def get_builder_builders(timeout=60, return_amount=True, raise_exception=True, u
             logger.error(f"get_builder_builders: {e}")
         time.sleep(0.1)
         if time.time() > start + timeout: break
-    raise Exception("Failed to get builder builders")
+    if not return_amount: return False
+    raise AutomationStopped("Failed to recognize builder builders; automation stopped")
 
 def require_exit(n=5, delay=0.1):
     def decorator(func):
@@ -1402,23 +1396,28 @@ class ADB_Manager:
         pyminitouch.config.ADB_EXECUTOR = adb_executable
         import pyminitouch.connection
         pyminitouch.connection._ADB = adb_executable
-        # if cls.is_connected(): return
+        # Retire this worker's existing touch server before creating another.
+        # Never kill the global ADB server: that disconnects other workers.
+        if cls._minitouch_device is not None:
+            try: cls._minitouch_device.stop()
+            except Exception: pass
+        cls._adbutils_device = cls._minitouch_device = cls._uiautomator_device = None
         subprocess.run([adb_executable, "start-server"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         res = adbutils.adb.connect(addr)
         if "connected" not in res:
-            subprocess.run([adb_executable, "kill-server"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             raise Exception("Failed to connect to ADB.")
-        devices = []
+        d2 = None
         try:
             d1 = adbutils.device(addr)
             d2 = MNTDevice(addr)
             d3 = u2.connect(addr)
             devices = [d1, d2, d3]
             Exit_Handler.register(d2.stop)
-        except (KeyboardInterrupt, SystemExit): raise
-        except:
-            subprocess.run([adb_executable, "kill-server"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            raise Exception("Failed to get ADB device.")
+        except BaseException:
+            if d2 is not None:
+                try: d2.stop()
+                except Exception: pass
+            raise
         cls._adbutils_device, cls._minitouch_device, cls._uiautomator_device = devices
     
     @classmethod
@@ -1457,15 +1456,23 @@ class Input_Handler:
     def _to_raw(cls, x_frac, y_frac):
         raw_w = int(ADB_Manager.minitouch_device.connection.max_x)
         raw_h = int(ADB_Manager.minitouch_device.connection.max_y)
-        if raw_w >= raw_h:
-            return int(x_frac * raw_w), int(y_frac * raw_h)
+        if raw_w == raw_h:
+            # BlueStacks Air reports square virtual axes; their dimensions do
+            # not reveal orientation. Read Android rotation instead of guessing.
+            try:
+                rotation = ADB_Manager.adbutils_device.rotation()
+            except Exception:
+                raise AutomationStopped('Cannot determine square-touchscreen rotation; refusing input') from None
+            return raw_touch(x_frac, y_frac, raw_w, raw_h, rotation)
+        if raw_w > raw_h:
+            return raw_touch(x_frac, y_frac, raw_w, raw_h, 0)
         # ponytail: not a "can't be set to landscape" limitation -- the display is
         # landscape (WINDOW_DIMS) same as any other emulator. MuMu's virtual touch
         # device just reports raw axes in native-portrait order regardless of the
         # display orientation, so we compensate for that rotation here. Assumes a
         # 90deg CW rotation, the common case for phone-profile emulators; upgrade
         # path: detect rotation direction if a 270deg case is ever seen.
-        return int(raw_w - y_frac * raw_w), int(x_frac * raw_h)
+        return raw_touch(x_frac, y_frac, raw_w, raw_h, 1)
 
     @classmethod
     def down(cls, x, y, pointer=0):
@@ -1617,11 +1624,13 @@ class Frame_Handler:
         if use_cached and cls.cached_frame is not None:
             frame = cls.cached_frame.copy()
         else:
-            try: frame = ADB_Manager.adbutils_device.framebuffer() # faster than screenshot but potentially unstable
+            try:
+                frame = ADB_Manager.adbutils_device.screenshot(error_ok=False)
             except (KeyboardInterrupt, SystemExit): raise
-            except: frame = ADB_Manager.adbutils_device.screenshot()
+            except Exception:
+                raise AutomationStopped('Screenshot capture failed; refusing further automation') from None
             frame = np.array(frame)[..., :3]
-            frame = cv2.resize(frame, WINDOW_DIMS, interpolation=cv2.INTER_NEAREST)
+            validate_frame(frame, WINDOW_DIMS)
             cls.cached_frame = frame.copy()
         # if configs.DEBUG: cls.save_frame(frame, "frame.png")
         if high_contrast: frame = cls.high_contrast(frame, thresh)

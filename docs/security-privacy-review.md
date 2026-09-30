@@ -61,4 +61,4 @@ De audit gebruikte uitsluitend lokale testclient-aanroepen en een fictief geheim
 
 Voor minimale gegevensdeling: remote webapp, Telegram en Groq leeg laten en Jev `off` zetten. Voor Jev blijven OpenRouter en de modelprovider noodzakelijk; behoud dan Groq uit zodat OCR lokaal blijft. De GUI/CDN- en woordenboekaanvragen zijn hiermee nog niet uitgeschakeld. Volledig offline gebruik vraagt lokale GUI-assets, een lokaal woordenboek en vooraf geïnstalleerde OCR-modellen.
 
-De gevonden beveiligingsproblemen zijn in deze controle niet gewijzigd. Dependencies zijn niet vastgepind; hun volledige gedrag en actuele kwetsbaarheden zijn niet geverifieerd.
+Bij deze controle zijn de problemen niet gewijzigd. In een latere fix voor foutieve Android-bediening is `diagnose=False` ingesteld op alle bot-Loguru-sinks, zodat deze stacktraces geen lokale variabelen meer diagnosticeren. De andere webapp-bevindingen blijven open. Dependencies zijn niet vastgepind; hun volledige gedrag en actuele kwetsbaarheden zijn niet geverifieerd.
